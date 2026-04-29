@@ -1,0 +1,8 @@
+{
+  "name": "create-finetuneops",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "create-finetuneops": "./bin/create-finetuneops.js"
+  }
+}

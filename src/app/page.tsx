@@ -1,25 +1,46 @@
+import Link from "next/link";
+import { ActivityTimeline } from "@/components/dashboard/activity-timeline";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { SectionCard } from "@/components/dashboard/section-card";
 import {
-  activeProject,
-  datasets,
-  evals,
-  jobs,
-  metrics,
-  milestones,
-  reliabilityNotes,
-  workspaceName,
-} from "@/lib/mock-data";
-import {
+  formatCurrency,
   formatHours,
-  formatNumber,
   formatPercent,
   formatSigned,
 } from "@/lib/format";
+import { milestones, reliabilityNotes } from "@/lib/mock-data";
+import { buildWorkspaceNudges } from "@/lib/nudge-engine";
+import { requireAuthSession } from "@/lib/auth-session";
+import { getWorkspaceData } from "@/lib/workspace-data";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const session = await requireAuthSession();
+  const {
+    activeProject,
+    activity,
+    evals,
+    experiments,
+    jobs,
+    metrics,
+    releases,
+    summary,
+    traces,
+    workflow,
+    workspaceName,
+  } = await getWorkspaceData({
+    organizationId: session.user.organizationId,
+  });
+  const nudges = buildWorkspaceNudges({
+    traces,
+    experiments,
+    jobs,
+    evals,
+    releases,
+  });
+
   return (
-    <div className="page-grid">
+    <div className="dashboard-layout">
+      <div className="page-grid">
       <section className="hero">
         <div className="hero-copy">
           <div>
@@ -27,24 +48,26 @@ export default function HomePage() {
             <h2>{activeProject}</h2>
           </div>
           <p className="muted">
-            This is the first product slice: a multi-page workspace for dataset
-            ops, training orchestration, and eval visibility. The UI is already
-            shaped like a real SaaS so we can wire persistence, auth, billing,
-            and workers into something customers can understand.
+            FineTuneOps is now shaped around the market-winning loop: trace
+            failures from production, convert the best ones into datasets,
+            compare candidate fixes, fine-tune only when needed, and gate every
+            release on quality, latency, and cost.
           </p>
           <div className="hero-actions">
             <span className="pill success">V1 focus: post-training teams</span>
-            <span className="pill">Next: Prisma + auth + uploads</span>
+            <span className="pill">Trace - Curate - Evaluate - Fine-tune - Promote</span>
+            <span className="pill">{summary.memberCount} members</span>
+            <span className="pill">{summary.billingPlan} plan</span>
           </div>
         </div>
         <div className="hero-side">
           <article className="panel mini-card">
             <p className="eyebrow">Current promise</p>
-            <h3>Fine-tune and evaluate custom LLMs without messy GPU workflows.</h3>
+            <h3>Turn real LLM failures into safer, cheaper, better releases.</h3>
           </article>
           <article className="panel mini-card">
             <p className="eyebrow">Revenue path</p>
-            <h3>Starter plan plus managed compute markup and beta onboarding.</h3>
+            <h3>Charge teams for reliability, visibility, and fewer wasted experiments.</h3>
           </article>
         </div>
       </section>
@@ -55,39 +78,53 @@ export default function HomePage() {
         ))}
       </section>
 
+      <SectionCard
+        title="Workflow"
+        description="This is the operational loop customers will come back to every week."
+        action="5 stages"
+      >
+        <div className="workflow-grid">
+          {workflow.map((stage) => (
+            <article key={stage.title} className="panel stage-card">
+              <p className="eyebrow">{stage.title}</p>
+              <h3>{stage.status}</h3>
+              <p className="muted">{stage.detail}</p>
+            </article>
+          ))}
+        </div>
+      </SectionCard>
+
       <div className="page-grid two-column">
         <SectionCard
-          title="Recent datasets"
-          description="Data versioning is the heart of the product."
-          action="3 tracked"
+          title="High-value traces"
+          description="Start by fixing the failures that move the needle, not by labeling random data."
+          action={`${traces.length} traces`}
         >
           <div className="list">
-            {datasets.map((dataset) => (
-              <article key={dataset.id} className="list-item">
+            {traces.map((trace) => (
+              <article key={trace.id} className="list-item">
                 <div className="list-copy">
-                  <h3>{dataset.name}</h3>
-                  <p className="muted">
-                    {dataset.source} • updated {dataset.lastUpdated}
-                  </p>
+                  <h3>{trace.title}</h3>
+                  <p className="muted">{trace.source} • captured {trace.capturedAt}</p>
                   <div className="list-meta">
-                    <span className="pill">{dataset.version}</span>
+                    <span className="pill">{trace.severity}</span>
                     <span
                       className={
-                        dataset.status === "Ready"
+                        trace.status === "Ready for curation"
                           ? "pill success"
-                          : dataset.status === "Processing"
+                          : trace.status === "Triaged"
                             ? "pill"
                             : "pill warning"
                       }
                     >
-                      {dataset.status}
+                      {trace.status}
                     </span>
                   </div>
                 </div>
                 <div className="value-stack">
-                  <strong>{formatNumber(dataset.rows)} rows</strong>
+                  <strong>{trace.spanCount} spans</strong>
                   <span className="muted">
-                    {formatPercent(dataset.quality)} quality
+                    {formatPercent(trace.opportunity)} opportunity
                   </span>
                 </div>
               </article>
@@ -96,21 +133,30 @@ export default function HomePage() {
         </SectionCard>
 
         <SectionCard
-          title="Build checklist"
-          description="What turns this shell into a paid product."
-          action="4 milestones"
+          title="Workspace activity"
+          description="Teams stay when they can see what changed without asking around."
+          action={`${activity.length} recent events`}
         >
-          <ol className="checklist">
-            {milestones.map((milestone) => (
-              <li key={milestone}>{milestone}</li>
+          <div className="list">
+            {activity.map((item) => (
+              <article key={item.id} className="list-item">
+                <div className="list-copy">
+                  <h3>{item.title}</h3>
+                  <p className="muted">{item.detail}</p>
+                </div>
+                <div className="value-stack">
+                  <strong>{item.kind}</strong>
+                  <span className="muted">{item.at}</span>
+                </div>
+              </article>
             ))}
-          </ol>
+          </div>
           <div className="callout panel">
             <p className="eyebrow">Why this matters</p>
             <p className="muted">
-              We are intentionally building the boring, monetizable middle:
-              datasets, jobs, evals, and reliability. That is where teams feel
-              pain and where a SaaS can earn early revenue.
+              Teams retain when the tool becomes their shared memory for model
+              decisions, regressions, and releases rather than another page they
+              only open during emergencies.
             </p>
           </div>
         </SectionCard>
@@ -118,29 +164,29 @@ export default function HomePage() {
 
       <div className="page-grid two-column">
         <SectionCard
-          title="Training visibility"
-          description="Track runs, GPU usage, checkpoints, and provider health."
-          action="4 jobs"
+          title="Experiment leaderboard"
+          description="Most teams should experiment before they fine-tune."
+          action={`${experiments.length} candidates`}
         >
           <table className="table">
             <thead>
               <tr>
-                <th>Job</th>
+                <th>Experiment</th>
                 <th>Status</th>
-                <th>Provider</th>
-                <th>Spend</th>
+                <th>Model</th>
+                <th>Cost</th>
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
-                <tr key={job.id}>
+              {experiments.map((experiment) => (
+                <tr key={experiment.id}>
                   <td>
-                    <strong>{job.name}</strong>
-                    <div className="muted">{job.baseModel}</div>
+                    <strong>{experiment.name}</strong>
+                    <div className="muted">{experiment.goal}</div>
                   </td>
-                  <td>{job.status}</td>
-                  <td>{job.provider}</td>
-                  <td>{formatHours(job.gpuHours)}</td>
+                  <td>{experiment.status}</td>
+                  <td>{experiment.candidateModel}</td>
+                  <td>{formatCurrency(experiment.cost)}</td>
                 </tr>
               ))}
             </tbody>
@@ -162,10 +208,66 @@ export default function HomePage() {
         </SectionCard>
       </div>
 
+      <div className="page-grid two-column">
+        <SectionCard
+          title="Fine-tune queue"
+          description="Spend GPU hours only after the data and experiments justify it."
+          action={`${jobs.length} jobs`}
+        >
+          <div className="list">
+            {jobs.map((job) => (
+              <article key={job.id} className="list-item">
+                <div className="list-copy">
+                  <h3>{job.name}</h3>
+                  <p className="muted">
+                    {job.baseModel} on {job.provider} • {job.gpuType}
+                  </p>
+                  <div className="progress-track">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${job.progress}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="value-stack">
+                  <strong>{job.progress}%</strong>
+                  <span className="muted">{formatHours(job.gpuHours)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Release gates"
+          description="No release should go live until quality, latency, and cost all look good."
+          action={`${releases.length} tracked`}
+        >
+          <div className="list">
+            {releases.map((release) => (
+              <article key={release.id} className="list-item">
+                <div className="list-copy">
+                  <h3>{release.name}</h3>
+                  <p className="muted">{release.channel} channel • {release.approvedBy}</p>
+                  <div className="status-row">
+                    <span className="pill">Quality: {release.qualityGate}</span>
+                    <span className="pill">Latency: {release.latencyGate}</span>
+                    <span className="pill">Cost: {release.costGate}</span>
+                  </div>
+                </div>
+                <div className="value-stack">
+                  <strong>{release.status}</strong>
+                </div>
+              </article>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
+
       <SectionCard
         title="Eval pulse"
-        description="Model quality needs a visible score before anyone deploys."
-        action="3 benchmark suites"
+        description="Quality must be visible before promotion, not after an outage."
+        action={`${evals.length} benchmark suites`}
       >
         <div className="list">
           {evals.map((evalRun) => (
@@ -190,6 +292,56 @@ export default function HomePage() {
           ))}
         </div>
       </SectionCard>
+
+      <SectionCard
+        title="Roadmap focus"
+        description="What turns this strong foundation into a paid beta customers can trust."
+        action={`${milestones.length} milestones`}
+      >
+        <ol className="checklist">
+          {milestones.map((milestone) => (
+            <li key={milestone}>{milestone}</li>
+          ))}
+        </ol>
+      </SectionCard>
+
+      </div>
+
+      <aside className="timeline-sidebar">
+        <section className="panel timeline-card">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">Smart nudges</p>
+              <h2>What needs attention next.</h2>
+            </div>
+            <span className="pill">{nudges.length} prompts</span>
+          </div>
+          <div className="list">
+            {nudges.map((nudge) => (
+              <article key={nudge.id} className="list-item">
+                <div className="list-copy">
+                  <span
+                    className={
+                      nudge.severity === "critical"
+                        ? "pill danger"
+                        : nudge.severity === "warning"
+                          ? "pill warning"
+                          : "pill success"
+                    }
+                  >
+                    {nudge.severity}
+                  </span>
+                  <p className="muted">{nudge.message}</p>
+                </div>
+                <Link href={nudge.href} className="secondary-button">
+                  {nudge.actionLabel}
+                </Link>
+              </article>
+            ))}
+          </div>
+        </section>
+        <ActivityTimeline items={activity} />
+      </aside>
     </div>
   );
 }

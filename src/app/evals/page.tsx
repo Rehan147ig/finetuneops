@@ -1,6 +1,7 @@
 import { SectionCard } from "@/components/dashboard/section-card";
+import { requireAuthSession } from "@/lib/auth-session";
 import { formatPercent, formatSigned } from "@/lib/format";
-import { evals } from "@/lib/mock-data";
+import { getWorkspaceData } from "@/lib/workspace-data";
 
 function evalClass(status: string): string {
   switch (status) {
@@ -13,13 +14,18 @@ function evalClass(status: string): string {
   }
 }
 
-export default function EvalsPage() {
+export default async function EvalsPage() {
+  const session = await requireAuthSession();
+  const { evals } = await getWorkspaceData({
+    organizationId: session.user.organizationId,
+  });
+
   return (
     <div className="page-grid">
       <div className="page-heading">
         <div>
           <p className="eyebrow">Evals</p>
-          <h2>Decide whether a candidate model is truly better</h2>
+          <h2>Decide whether a candidate is truly better before promotion</h2>
         </div>
         <span className="pill">Next build: run suites against model snapshots</span>
       </div>
@@ -61,7 +67,7 @@ export default function EvalsPage() {
       <div className="page-grid two-column">
         <SectionCard
           title="Scorecard design"
-          description="Keep the first eval product simple enough to trust."
+          description="Keep the first eval product simple enough to trust and strict enough to block bad releases."
           action="V1 plan"
         >
           <ol className="checklist">

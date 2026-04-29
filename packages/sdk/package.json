@@ -1,0 +1,29 @@
+{
+  "name": "finetuneops",
+  "version": "0.1.0",
+  "description": "SDK for FinetuneOps LLM ops platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "node ../../node_modules/vitest/vitest.mjs run packages/sdk/tests --root ../../",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "openai": ">=4.0.0",
+    "@anthropic-ai/sdk": ">=0.20.0"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}

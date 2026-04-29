@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -12,10 +12,29 @@ model Organization {
   name        String
   slug        String    @unique
   billingPlan String    @default("starter")
+  billingInterval String @default("monthly")
+  billingEmail String?
+  stripeCustomerId String? @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId String?
+  stripeSubscriptionStatus String @default("inactive")
+  stripeCurrentPeriodStart DateTime?
+  stripeCurrentPeriodEnd DateTime?
+  trialEndsAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   projects    Project[]
   users       User[]
+  invites     WorkspaceInvite[]
+  apiKeys     ApiKey[]
+  usageRecords BillingUsage[]
+  backgroundJobs BackgroundJob[]
+  providerCredentials ProviderCredential[]
+  notificationLogs NotificationLog[]
+  slackIntegration SlackIntegration?
+  promptTemplates PromptTemplate[]
+  searchDocuments SearchDocument[]
+  auditEvents  AuditEvent[]
 }
 
 model User {
@@ -24,9 +43,79 @@ model User {
   name           String
   email          String       @unique
   role           String       @default("owner")
+  image          String?
+  emailVerified  DateTime?
+  passwordHash   String?
+  onboardingCompleted Boolean @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accounts       Account[]
+  sessions       Session[]
+  sentInvites    WorkspaceInvite[] @relation("WorkspaceInviteSender")
+  createdApiKeys ApiKey[] @relation("ApiKeyCreator")
+  auditEvents    AuditEvent[]
+
+  @@index([organizationId])
+}
+
+model AuditEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  actorEmail     String?
+  actorName      String?
+  actorRole      String?
+  action         String
+  targetType     String
+  targetId       String?
+  targetName     String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor          User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action])
+  @@index([actorUserId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
 
 model Project {
@@ -39,9 +128,115 @@ model Project {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  traceEvents    TraceEvent[]
   datasets       Dataset[]
+  experiments    ExperimentRun[]
   trainingJobs   TrainingJob[]
   evalRuns       EvalRun[]
+  releases       ModelRelease[]
+  activityLogs   ActivityLog[]
+  backgroundJobs BackgroundJob[]
+  promptTemplates PromptTemplate[]
+  searchDocuments SearchDocument[]
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+}
+
+model SearchDocument {
+  id             String       @id @default(cuid())
+  organizationId String?
+  projectId      String?
+  sourceType     String
+  sourceId       String
+  title          String
+  slug           String?
+  content        String       @db.Text
+  embedding      Json?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceType, sourceId])
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([projectId])
+  @@index([sourceType])
+  @@index([slug])
+}
+
+model PromptTemplate {
+  id               String          @id @default(cuid())
+  organizationId   String
+  projectId        String?
+  name             String
+  description      String?
+  currentVersionId String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+  createdBy        String
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  currentVersion   PromptVersion?  @relation("CurrentPromptVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions         PromptVersion[] @relation("TemplateVersions")
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, deletedAt])
+  @@index([projectId])
+}
+
+model PromptVersion {
+  id               String           @id @default(cuid())
+  promptTemplateId String
+  version          String
+  content          String           @db.Text
+  variables        String[]
+  commitMessage    String
+  authorId         String
+  parentVersionId  String?
+  createdAt        DateTime         @default(now())
+  evalScore        Float?
+  latencyMs        Int?
+  deployedAt       DateTime?
+  deployedBy       String?
+  environment      String?
+  template         PromptTemplate   @relation("TemplateVersions", fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  currentForTemplates PromptTemplate[] @relation("CurrentPromptVersion")
+
+  @@index([promptTemplateId])
+  @@index([promptTemplateId, createdAt])
+}
+
+model TraceEvent {
+  id                String    @id @default(cuid())
+  projectId         String
+  title             String
+  source            String
+  inputText         String?
+  outputText        String?
+  modelName         String?
+  latencyMs         Int?
+  metadata          String    @default("{}")
+  tags              String    @default("[]")
+  status            String    @default("triaged")
+  severity          String    @default("medium")
+  spanCount         Int       @default(0)
+  opportunityScore  Float     @default(0)
+  capturedAt        DateTime  @default(now())
+  convertedDatasetId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([projectId, capturedAt])
+  @@index([status])
+  @@index([projectId, status])
 }
 
 model Dataset {
@@ -49,6 +244,7 @@ model Dataset {
   projectId    String
   name         String
   version      String
+  source       String?
   status       String      @default("processing")
   rowCount     Int         @default(0)
   storagePath  String?
@@ -56,27 +252,108 @@ model Dataset {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  experiments  ExperimentRun[]
   trainingJobs TrainingJob[]
   evalRuns     EvalRun[]
+  examples     DatasetExample[]
+  qualityReport DatasetQualityReport?
+
+  @@index([projectId])
+  @@index([status])
+  @@index([projectId, status])
+  @@index([qualityScore])
+}
+
+model ExperimentRun {
+  id             String      @id @default(cuid())
+  projectId      String
+  datasetId      String?
+  name           String
+  goal           String
+  candidateModel String
+  promptVersion  String
+  status         String      @default("running")
+  score          Float?
+  costEstimate   Float?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dataset        Dataset?    @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  trainingJobs   TrainingJob[]
+  releases       ModelRelease[]
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@index([projectId, status])
+  @@index([datasetId])
 }
 
 model TrainingJob {
-  id         String    @id @default(cuid())
-  projectId  String
-  datasetId  String?
-  name       String
-  modelBase  String
-  provider   String
-  status     String    @default("queued")
-  progress   Int       @default(0)
-  gpuType    String?
-  gpuHours   Float     @default(0)
-  startedAt  DateTime?
-  finishedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  dataset    Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  id             String        @id @default(cuid())
+  projectId      String
+  datasetId      String?
+  experimentId   String?
+  name           String
+  modelBase      String
+  provider       String
+  status         String        @default("queued")
+  progress       Int           @default(0)
+  gpuType        String?
+  gpuHours       Float         @default(0)
+  checkpoint     String?
+  openaiFileId   String?
+  openaiJobId    String?
+  pollCount      Int           @default(0)
+  progressNote   String?
+  completedModelId String?
+  trainedTokens  Int?
+  validationLoss Float?
+  providerJobId  String?
+  fineTunedModelId String?
+  errorMessage   String?
+  providerMetadata Json?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dataset        Dataset?      @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  experiment     ExperimentRun? @relation(fields: [experimentId], references: [id], onDelete: SetNull)
+  releases       ModelRelease[]
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@index([projectId, status])
+  @@index([datasetId])
+  @@index([experimentId])
+  @@index([openaiJobId])
+}
+
+model NotificationLog {
+  id            String       @id @default(cuid())
+  workspaceId    String
+  type          String
+  referenceId   String
+  sentAt        DateTime     @default(now())
+  workspace     Organization @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, type, referenceId])
+  @@index([workspaceId, type, referenceId])
+  @@index([workspaceId, sentAt])
+  @@index([sentAt])
+}
+
+model SlackIntegration {
+  id           String       @id @default(cuid())
+  workspaceId  String       @unique
+  webhookUrl   String
+  channel      String
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  createdBy    String
+  workspace    Organization @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model EvalRun {
@@ -89,8 +366,233 @@ model EvalRun {
   status     String    @default("queued")
   score      Float?
   delta      Float?
+  judge      String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dataset    Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@index([projectId, status])
+  @@index([datasetId])
 }
+
+model ModelRelease {
+  id              String         @id @default(cuid())
+  projectId       String
+  experimentId    String?
+  trainingJobId   String?
+  name            String
+  channel         String
+  status          String         @default("gated")
+  qualityGate     String
+  latencyGate     String
+  costGate        String
+  approvedBy      String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  project         Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  experiment      ExperimentRun? @relation(fields: [experimentId], references: [id], onDelete: SetNull)
+  trainingJob     TrainingJob?   @relation(fields: [trainingJobId], references: [id], onDelete: SetNull)
+  reviewLinks     ReviewLink[]
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@index([projectId, status])
+  @@index([experimentId])
+  @@index([trainingJobId])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  projectId String
+  type      String
+  message   String
+  timestamp DateTime @default(now())
+  userId    String
+  metadata  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([projectId, timestamp])
+}
+
+model ReviewLink {
+  id            String       @id @default(cuid())
+  releaseId     String
+  token         String       @unique
+  decision      String?
+  reviewerName  String?
+  approverNotes String?
+  expiresAt     DateTime
+  decidedAt     DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  release       ModelRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([token, expiresAt])
+}
+
+model WorkspaceInvite {
+  id              String       @id @default(cuid())
+  organizationId  String
+  invitedByUserId String
+  email           String
+  role            String       @default("viewer")
+  token           String       @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy       User         @relation("WorkspaceInviteSender", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email])
+  @@index([token, expiresAt])
+}
+
+model ApiKey {
+  id              String       @id @default(cuid())
+  organizationId  String
+  createdByUserId String
+  name            String
+  keyPrefix       String
+  keyHash         String       @unique
+  lastFour        String
+  revokedAt       DateTime?
+  lastUsedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy       User         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, revokedAt])
+  @@index([createdByUserId])
+}
+
+model BillingUsage {
+  id                String       @id @default(cuid())
+  organizationId    String
+  planId            String
+  periodStart       DateTime
+  periodEnd         DateTime
+  tracesUsed        Int          @default(0)
+  fineTuneJobsUsed  Int          @default(0)
+  overageTraces     Int          @default(0)
+  warningSentAt     DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, periodStart, periodEnd])
+  @@index([organizationId])
+  @@index([organizationId, periodStart])
+  @@index([organizationId, periodEnd])
+}
+
+model ProcessedWebhookEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
+}
+
+model BackgroundJob {
+  id                    String       @id @default(cuid())
+  organizationId        String
+  projectId             String?
+  queueName             String
+  jobType               String
+  status                String       @default("queued")
+  progress              Int          @default(0)
+  attempts              Int          @default(0)
+  maxAttempts           Int          @default(3)
+  estimatedCompletionAt DateTime?
+  payload               String       @default("{}")
+  result                String?
+  logs                  String       @default("[]")
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  startedAt             DateTime?
+  finishedAt            DateTime?
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project               Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([status])
+  @@index([organizationId, status])
+  @@index([projectId, status])
+  @@index([jobType, status])
+}
+
+model ProviderCredential {
+  id           String       @id @default(cuid())
+  workspaceId  String
+  provider     String
+  label        String
+  encryptedKey String
+  iv           String
+  authTag      String
+  isActive     Boolean      @default(true)
+  lastTestedAt DateTime?
+  lastTestOk   Boolean?
+  createdAt    DateTime     @default(now())
+  createdBy    String
+  workspace    Organization @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, provider])
+  @@index([workspaceId, provider, isActive])
+  @@index([workspaceId, createdAt])
+}
+
+model DatasetExample {
+  id            String   @id @default(cuid())
+  datasetId      String
+  sourceTraceId  String?
+  inputText      String
+  outputText     String?
+  metadata       String   @default("{}")
+  createdAt      DateTime @default(now())
+  dataset        Dataset   @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([datasetId, createdAt])
+}
+
+model DatasetQualityReport {
+  id              String   @id @default(cuid())
+  datasetId       String   @unique
+  healthScore     Int
+  totalExamples   Int
+  goodExamples    Int
+  exactDuplicates Int
+  nearDuplicates  Int
+  piiDetected     Int
+  tooShort        Int
+  tooLong         Int
+  emptyOutputs    Int
+  imbalanced      Boolean
+  languageMixed   Int
+  details         Json
+  recommendation  String
+  estimatedCost   Float
+  projectedSaving Float
+  createdAt       DateTime @default(now())
+  dataset         Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([datasetId])
+}
+
+model HealthCheck {
+  id        String   @id @default(cuid())
+  checkedAt DateTime @default(now())
+}
+
