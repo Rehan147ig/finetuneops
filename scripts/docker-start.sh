@@ -13,4 +13,8 @@ if [ "${RUN_DEMO_SEED:-true}" = "true" ]; then
 fi
 
 echo "Starting FineTuneOps..."
+if [ -f ".next/standalone/server.js" ]; then
+  exec node .next/standalone/server.js
+fi
+
 exec npx next start --hostname 0.0.0.0 --port 3000
