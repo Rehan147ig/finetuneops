@@ -1,3 +1,5 @@
+import { logger } from "@/lib/logger";
+
 type RequiredEnvVar = {
   key: string;
   help: string;
@@ -27,6 +29,30 @@ export type ServerEnv = {
   ADMIN_SECRET: string;
 };
 
+const buildTimeFallbackEnv: ServerEnv = {
+  DATABASE_URL: "postgresql://build:build@127.0.0.1:5432/finetuneops?schema=public",
+  NEXTAUTH_SECRET: "build-time-nextauth-secret",
+  NEXTAUTH_URL: "http://127.0.0.1:3000",
+  GOOGLE_CLIENT_ID: "build-google-client-id",
+  GOOGLE_CLIENT_SECRET: "build-google-client-secret",
+  GITHUB_CLIENT_ID: "build-github-client-id",
+  GITHUB_CLIENT_SECRET: "build-github-client-secret",
+  STRIPE_SECRET_KEY: "sk_test_build_placeholder",
+  STRIPE_PUBLISHABLE_KEY: "pk_test_build_placeholder",
+  STRIPE_WEBHOOK_SECRET: "whsec_build_placeholder",
+  RESEND_API_KEY: "re_build_placeholder",
+  REDIS_URL: "redis://127.0.0.1:6379",
+  ENCRYPTION_KEY: "12345678901234567890123456789012",
+  RESEND_FROM_EMAIL: "FineTuneOps <build@example.com>",
+  OPENAI_API_KEY: "",
+  ANTHROPIC_API_KEY: "",
+  APP_URL: "http://127.0.0.1:3000",
+  LOG_LEVEL: "info",
+  SENTRY_DSN: "",
+  INTERNAL_SLACK_WEBHOOK: "",
+  ADMIN_SECRET: "",
+};
+
 const requiredServerEnvVars: RequiredEnvVar[] = [
   { key: "DATABASE_URL", help: "Set your PostgreSQL connection string." },
   { key: "NEXTAUTH_SECRET", help: "Generate one with: https://authjs.dev/getting-started/deployment#auth_secret" },
@@ -45,14 +71,33 @@ const requiredServerEnvVars: RequiredEnvVar[] = [
 
 let cachedEnv: ServerEnv | null = null;
 
+function isBuildPhase(source: NodeJS.ProcessEnv) {
+  return (
+    source === process.env &&
+    (process.env.npm_lifecycle_event === "build" ||
+      process.env.NEXT_PHASE === "phase-production-build")
+  );
+}
+
 function requireNonEmptyValue(source: NodeJS.ProcessEnv, item: RequiredEnvVar) {
   const value = source[item.key];
 
-  if (!value || value.trim().length === 0) {
-    throw new Error(`Missing required env var: ${item.key}. ${item.help}`);
+  if (value && value.trim().length > 0) {
+    return value;
   }
 
-  return value;
+  if (isBuildPhase(source)) {
+    logger.warn({
+      event: "env_var_missing_build_fallback",
+      key: item.key,
+      lifecycleEvent: process.env.npm_lifecycle_event ?? "unknown",
+      nextPhase: process.env.NEXT_PHASE ?? "unknown",
+    });
+
+    return buildTimeFallbackEnv[item.key as keyof ServerEnv];
+  }
+
+  throw new Error(`Missing required env var: ${item.key}. ${item.help}`);
 }
 
 export function validateServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {

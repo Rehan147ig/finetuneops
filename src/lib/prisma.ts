@@ -1,11 +1,32 @@
 import { PrismaClient } from "@prisma/client";
 import { logger } from "@/lib/logger";
 
+const BUILD_TIME_DATABASE_URL =
+  "postgresql://build:build@127.0.0.1:5432/finetuneops?schema=public";
+
+function resolveDatabaseUrl() {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+
+  if (databaseUrl) {
+    return databaseUrl;
+  }
+
+  logger.warn({
+    event: "database_url_missing",
+    fallback: "placeholder_url",
+    lifecycleEvent: process.env.npm_lifecycle_event ?? "unknown",
+    nextPhase: process.env.NEXT_PHASE ?? "unknown",
+  });
+  return BUILD_TIME_DATABASE_URL;
+}
+
 function createPrismaClient() {
+  const databaseUrl = resolveDatabaseUrl();
+
   return new PrismaClient({
     datasources: {
       db: {
-        url: process.env.DATABASE_URL,
+        url: databaseUrl,
       },
     },
     log: [

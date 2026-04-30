@@ -26,4 +26,20 @@ describe("validateServerEnv", () => {
       }),
     ).toThrow(/Missing required env var: STRIPE_WEBHOOK_SECRET/);
   });
+
+  it("falls back to build-safe placeholders during next build", () => {
+    const previousLifecycleEvent = process.env.npm_lifecycle_event;
+    const previousNextPhase = process.env.NEXT_PHASE;
+
+    process.env.npm_lifecycle_event = "build";
+    process.env.NEXT_PHASE = "phase-production-build";
+
+    const result = validateServerEnv(process.env);
+
+    expect(result.DATABASE_URL).toBe("postgresql://build:build@127.0.0.1:5432/finetuneops?schema=public");
+    expect(result.STRIPE_WEBHOOK_SECRET).toBe("whsec_build_placeholder");
+
+    process.env.npm_lifecycle_event = previousLifecycleEvent;
+    process.env.NEXT_PHASE = previousNextPhase;
+  });
 });
