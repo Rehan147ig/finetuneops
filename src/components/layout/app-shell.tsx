@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
 import { ReactNode } from "react";
 
 const navItems = [
@@ -130,13 +129,9 @@ export function AppShell({ children }: AppShellProps) {
             <button className="primary-button" type="button">
               Capture a new failure trace
             </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => signOut({ callbackUrl: "/sign-in" })}
-            >
+            <Link className="secondary-button" href="/sign-in">
               Sign out
-            </button>
+            </Link>
           </div>
         </header>
 
