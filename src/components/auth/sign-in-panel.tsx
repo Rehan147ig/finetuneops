@@ -33,23 +33,45 @@ export function SignInPanel() {
 
   return (
     <section className="auth-shell">
+      <div className="auth-showcase">
+        <div className="hero-orbit" aria-hidden="true" />
+        <div className="auth-showcase-copy">
+          <p className="eyebrow">FinetuneOps</p>
+          <h1>One command center for improving production LLMs.</h1>
+          <p className="muted">
+            Capture traces, turn failures into datasets, version prompts,
+            evaluate candidates, monitor queues, and ship releases with proof.
+          </p>
+          <div className="hero-actions">
+            <span className="pill success">Post-training ops</span>
+            <span className="pill">Prompt memory</span>
+            <span className="pill">Trace analytics</span>
+          </div>
+        </div>
+      </div>
+
       <article className="panel auth-card">
         <div className="page-heading">
           <div>
             <p className="eyebrow">Sign in</p>
-            <h2>Open your FinetuneOps workspace</h2>
+            <h2>Open your workspace</h2>
           </div>
-          <span className="pill success">Auth.js</span>
+          <span className="pill success">Live beta</span>
         </div>
 
         <form className="auth-form" onSubmit={handleCredentialsSignIn}>
           <label className="field">
             <span>Email</span>
-            <input name="email" type="email" required />
+            <input name="email" type="email" autoComplete="email" required />
           </label>
           <label className="field">
             <span>Password</span>
-            <input name="password" type="password" required />
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
           </label>
           {error ? <p className="error-text">{error}</p> : null}
           <button className="primary-button" type="submit" disabled={pending}>
@@ -62,10 +84,18 @@ export function SignInPanel() {
         </div>
 
         <div className="auth-actions">
-          <button className="secondary-button" type="button" onClick={() => signIn("google", { callbackUrl: "/" })}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => signIn("google", { callbackUrl: "/" })}
+          >
             Google
           </button>
-          <button className="secondary-button" type="button" onClick={() => signIn("github", { callbackUrl: "/" })}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => signIn("github", { callbackUrl: "/" })}
+          >
             GitHub
           </button>
         </div>
