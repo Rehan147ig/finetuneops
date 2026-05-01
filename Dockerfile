@@ -20,5 +20,5 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app ./
 RUN chmod +x ./scripts/docker-start.sh
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 CMD curl -fsS http://localhost:3000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 CMD curl -fsS "http://localhost:${PORT:-3000}/api/health" || exit 1
 CMD ["sh", "./scripts/docker-start.sh"]

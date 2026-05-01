@@ -13,4 +13,6 @@ if [ "${RUN_DEMO_SEED:-true}" = "true" ]; then
 fi
 
 echo "Starting FineTuneOps..."
-exec npx next start --hostname 0.0.0.0 --port 3000
+APP_PORT="${PORT:-3000}"
+echo "Listening on 0.0.0.0:${APP_PORT}"
+exec npx next start --hostname 0.0.0.0 --port "${APP_PORT}"
