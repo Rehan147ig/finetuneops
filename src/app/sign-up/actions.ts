@@ -5,6 +5,7 @@ import { z } from "zod";
 import { errorResult, successResult } from "@/lib/action-state";
 import { prisma } from "@/lib/prisma";
 import { createWorkspaceUser } from "@/lib/onboarding";
+import { logger } from "@/lib/logger";
 
 const signUpSchema = z.object({
   name: z.string().min(2, "Add your full name."),
@@ -27,25 +28,52 @@ export async function signUpAction(_: unknown, formData: FormData) {
     return errorResult(parsed.error.issues[0]?.message ?? "Invalid sign-up details.", "Sign-up failed");
   }
 
-  const existingUser = await prisma.user.findUnique({
-    where: {
+  let existingUser;
+  try {
+    existingUser = await prisma.user.findUnique({
+      where: {
+        email: parsed.data.email.toLowerCase(),
+      },
+    });
+  } catch (error) {
+    logger.error({
+      event: "signup_existing_user_lookup_failed",
       email: parsed.data.email.toLowerCase(),
-    },
-  });
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return errorResult(
+      "We could not check your account yet. Please try again in a minute.",
+      "Sign-up temporarily unavailable",
+    );
+  }
 
   if (existingUser) {
     return errorResult("An account with this email already exists. Please sign in instead.", "Account exists");
   }
 
-  const passwordHash = await hash(parsed.data.password, 10);
+  try {
+    const passwordHash = await hash(parsed.data.password, 10);
 
-  await createWorkspaceUser({
-    name: parsed.data.name,
-    email: parsed.data.email,
-    passwordHash,
-    workspaceName: parsed.data.workspaceName,
-    inviteToken: parsed.data.inviteToken,
-  });
+    await createWorkspaceUser({
+      name: parsed.data.name,
+      email: parsed.data.email,
+      passwordHash,
+      workspaceName: parsed.data.workspaceName,
+      inviteToken: parsed.data.inviteToken,
+    });
+  } catch (error) {
+    logger.error({
+      event: "signup_workspace_creation_failed",
+      email: parsed.data.email.toLowerCase(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return errorResult(
+      "We could not create your workspace yet. Please try again in a minute.",
+      "Workspace creation failed",
+    );
+  }
 
   return successResult("Your account is ready. Sign in to open your workspace.", "Workspace created");
 }

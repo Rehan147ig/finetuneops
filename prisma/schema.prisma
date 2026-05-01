@@ -122,7 +122,7 @@ model Project {
   id             String        @id @default(cuid())
   organizationId String
   name           String
-  slug           String        @unique
+  slug           String
   description    String?
   status         String        @default("active")
   createdAt      DateTime      @default(now())
@@ -141,6 +141,7 @@ model Project {
 
   @@index([organizationId])
   @@index([organizationId, createdAt])
+  @@unique([organizationId, slug])
 }
 
 model SearchDocument {
