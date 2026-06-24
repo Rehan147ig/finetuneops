@@ -17,6 +17,7 @@ const {
   openAiFineTuningCreate,
   openAiFineTuningRetrieve,
   sendSlackMessage,
+  autoDetectRegressionAfterEval,
 } = vi.hoisted(() => ({
   mockPrisma: {
     traceEvent: {
@@ -33,6 +34,9 @@ const {
     trainingJob: {
       findFirst: vi.fn(),
       update: vi.fn(),
+    },
+    evalRun: {
+      findFirst: vi.fn(),
     },
     organization: {
       findUnique: vi.fn(),
@@ -57,6 +61,7 @@ const {
   openAiFineTuningCreate: vi.fn(),
   openAiFineTuningRetrieve: vi.fn(),
   sendSlackMessage: vi.fn(),
+  autoDetectRegressionAfterEval: vi.fn(),
 }));
 
 vi.mock("openai", () => ({
@@ -127,6 +132,10 @@ vi.mock("../lib/slack", () => ({
   sendSlackMessage,
 }));
 
+vi.mock("../lib/regression-engine", () => ({
+  autoDetectRegressionAfterEval,
+}));
+
 vi.mock("../lib/env", () => ({
   getServerEnv: () => ({
     DATABASE_URL: "postgresql://user:pass@localhost:5432/finetuneops?schema=public",
@@ -188,6 +197,8 @@ describe("worker runtime", () => {
     queueGetActiveCount.mockResolvedValue(0);
     queueClose.mockResolvedValue(undefined);
     sendSlackMessage.mockResolvedValue(undefined);
+    autoDetectRegressionAfterEval.mockResolvedValue([]);
+    mockPrisma.evalRun.findFirst.mockResolvedValue(null);
 
     if (typeof File === "undefined") {
       vi.stubGlobal(
@@ -483,6 +494,17 @@ describe("worker runtime", () => {
       trained_tokens: 4000,
       result_files: [{ metrics: { validation_loss: 0.42 } }],
     });
+    mockPrisma.evalRun.findFirst.mockResolvedValueOnce({
+      id: "eval_candidate",
+      projectId: "project_1",
+      status: "completed",
+    });
+    autoDetectRegressionAfterEval.mockResolvedValueOnce([
+      {
+        id: "alert_1",
+        metric: "accuracy",
+      },
+    ]);
     completeBackgroundJob.mockResolvedValue({ id: "bg_1" });
 
     await handlePollFineTuneJob(
@@ -506,6 +528,20 @@ describe("worker runtime", () => {
     expect(enqueueBackgroundJob).toHaveBeenCalledWith(
       expect.objectContaining({
         jobType: "send-notification",
+      }),
+    );
+    expect(autoDetectRegressionAfterEval).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      projectId: "project_1",
+      evalRunId: "eval_candidate",
+    });
+    expect(recordActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "regression_detected",
+        metadata: expect.objectContaining({
+          alertCount: 1,
+          evalRunId: "eval_candidate",
+        }),
       }),
     );
   });

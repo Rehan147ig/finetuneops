@@ -47,24 +47,23 @@ The current product is useful, but the strongest revenue features are not
 fully built yet. These are the features that can separate FinetuneOps from
 generic LLM observability tools.
 
-### 1. Regression Detection Engine - Missing
+### 1. Regression Detection Engine - Built
 
 This should become the core paid feature.
 
-Missing today:
+Now built:
 
-- Comparing eval scores before and after a fine-tune.
-- Detecting metric drops below team-defined thresholds.
-- Creating `RegressionAlert` records.
-- Multi-metric eval scores for per-metric regression tracking.
+- `EvalRun.scores` stores multi-metric eval results.
+- `RegressionAlert` stores per-metric regressions with severity and status.
+- `src/lib/regression-engine.ts` compares baseline and candidate eval runs.
+- Regression checks run after successful fine-tune polling when a completed eval is available.
+- Alerts are written idempotently, so repeated checks do not create duplicates.
 
 Current limitation:
 
-- `EvalRun` exists, but it only has `score Float?` and `delta Float?`.
-- There is no `scores Json` field for metrics such as
-  `billing_accuracy`, `refund_accuracy`, `safety_score`, `f1`, or
-  `hallucination_rate`.
-- There is no baseline-versus-candidate comparison engine.
+- Regression alerts exist in the database, but the dedicated regressions UI is not built yet.
+- Team-defined thresholds are not configurable in the UI yet.
+- TRA analysis does not yet explain which training examples caused the regression.
 
 Why it matters:
 
@@ -139,10 +138,8 @@ decision engine.
 
 Missing today:
 
-- Multi-metric eval score storage.
 - Raw output storage per eval case.
-- Baseline versus candidate comparison.
-- Per-metric thresholds.
+- Per-metric threshold configuration.
 - Regression gating tied to releases.
 
 Why it matters:
@@ -172,8 +169,8 @@ These are the highest-leverage features to build next.
 
 | Feature | Estimated Effort | Revenue Impact |
 | --- | ---: | --- |
-| Multi-metric EvalRun scores | 1 day | Blocker for regression detection |
-| RegressionAlert schema and detection engine | 2 days | Core product wedge |
+| Multi-metric EvalRun scores | Done | Blocker for regression detection |
+| RegressionAlert schema and detection engine | Done | Core product wedge |
 | TRA Engine with 4 analysis techniques | 4 days | Main reason to pay $399/month |
 | TRA report UI | 2 days | Customer-visible proof and trust |
 | One-click recovery | 2 days | Magic moment |
@@ -183,14 +180,12 @@ These are the highest-leverage features to build next.
 
 Build only these in order before adding more dashboards or polish:
 
-1. Add multi-metric eval scores to `EvalRun`.
-2. Add `RegressionAlert`, `TraReport`, `SuspiciousExample`, and `RecoveryJob`.
-3. Build `src/lib/regression-engine.ts`.
-4. Build `src/lib/tra-engine.ts`.
-5. Add `run-tra-analysis` and `run-recovery-job` worker types.
-6. Add `/regressions` UI for alerts, TRA reports, and recovery actions.
-7. Add one-click recovery to remove suspicious examples and retrain.
-8. Add Together AI and Fireworks fine-tune adapters.
+1. Build `src/lib/tra-engine.ts`.
+2. Add `TraReport`, `SuspiciousExample`, and `RecoveryJob`.
+3. Add `run-tra-analysis` and `run-recovery-job` worker types.
+4. Add `/regressions` UI for alerts, TRA reports, and recovery actions.
+5. Add one-click recovery to remove suspicious examples and retrain.
+6. Add Together AI and Fireworks fine-tune adapters.
 
 ## Why Teams Would Pay
 

@@ -18,6 +18,7 @@ import { getServerEnv } from "../lib/env";
 import { getActiveCredential } from "../lib/provider-credentials";
 import { prisma } from "../lib/prisma";
 import { getQueueStats } from "../lib/queue-monitor";
+import { autoDetectRegressionAfterEval } from "../lib/regression-engine";
 import { initializeSentry, Sentry } from "../lib/sentry";
 import { buildDatasetQualityReport, checkPiiDetection } from "../lib/quality-engine";
 import { sendSlackMessage, type SlackMessage } from "../lib/slack";
@@ -836,6 +837,54 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
           },
         },
       });
+
+      const latestCompletedEval = await prisma.evalRun.findFirst({
+        where: {
+          projectId: incrementedJob.projectId,
+          status: "completed",
+          OR: [
+            {
+              jobId: trainingJobId,
+            },
+            {
+              jobId: incrementedJob.id,
+            },
+          ],
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      }) ?? await prisma.evalRun.findFirst({
+        where: {
+          projectId: incrementedJob.projectId,
+          status: "completed",
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      if (latestCompletedEval) {
+        const regressionAlerts = await autoDetectRegressionAfterEval({
+          organizationId: currentJob.data.organizationId,
+          projectId: incrementedJob.projectId,
+          evalRunId: latestCompletedEval.id,
+        });
+
+        if (regressionAlerts.length > 0) {
+          await recordActivityEvent({
+            projectId: incrementedJob.projectId,
+            type: "regression_detected",
+            message: `${regressionAlerts.length} regression alert${regressionAlerts.length === 1 ? "" : "s"} opened after ${incrementedJob.name}.`,
+            userId: "system",
+            metadata: {
+              trainingJobId,
+              evalRunId: latestCompletedEval.id,
+              alertCount: regressionAlerts.length,
+            },
+          });
+        }
+      }
 
       await enqueueBackgroundJob({
         organizationId: currentJob.data.organizationId,

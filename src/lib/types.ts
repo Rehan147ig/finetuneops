@@ -39,6 +39,7 @@ export type ActivityEventType =
   | "fine_tune_launched"
   | "fine_tune_completed"
   | "fine_tune_failed"
+  | "regression_detected"
   | "release_approved"
   | "release_rejected"
   | "background_job_completed"

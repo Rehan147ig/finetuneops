@@ -35,6 +35,7 @@ model Organization {
   promptTemplates PromptTemplate[]
   searchDocuments SearchDocument[]
   auditEvents  AuditEvent[]
+  regressionAlerts RegressionAlert[]
 }
 
 model User {
@@ -138,6 +139,7 @@ model Project {
   backgroundJobs BackgroundJob[]
   promptTemplates PromptTemplate[]
   searchDocuments SearchDocument[]
+  regressionAlerts RegressionAlert[]
 
   @@index([organizationId])
   @@index([organizationId, createdAt])
@@ -366,18 +368,49 @@ model EvalRun {
   benchmark  String
   status     String    @default("queued")
   score      Float?
+  scores     Json?
   delta      Float?
   judge      String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dataset    Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  baselineAlerts RegressionAlert[] @relation("RegressionBaselineRun")
+  candidateAlerts RegressionAlert[] @relation("RegressionCandidateRun")
 
   @@index([projectId])
   @@index([projectId, createdAt])
   @@index([status])
   @@index([projectId, status])
   @@index([datasetId])
+}
+
+model RegressionAlert {
+  id                String       @id @default(cuid())
+  organizationId    String
+  projectId         String
+  baselineEvalRunId String
+  candidateEvalRunId String
+  metric            String
+  baselineScore     Float
+  candidateScore    Float
+  delta             Float
+  severity          String       @default("warning")
+  status            String       @default("open")
+  traReportId       String?      @unique
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  baselineRun       EvalRun      @relation("RegressionBaselineRun", fields: [baselineEvalRunId], references: [id], onDelete: Cascade)
+  candidateRun      EvalRun      @relation("RegressionCandidateRun", fields: [candidateEvalRunId], references: [id], onDelete: Cascade)
+
+  @@unique([baselineEvalRunId, candidateEvalRunId, metric])
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
 }
 
 model ModelRelease {
