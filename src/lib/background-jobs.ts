@@ -11,6 +11,7 @@ export const backgroundJobTypes = [
   "score-dataset",
   "run-experiment",
   "run-tra-analysis",
+  "run-recovery-job",
   "launch-finetune",
   "poll-finetune",
   "send-notification",

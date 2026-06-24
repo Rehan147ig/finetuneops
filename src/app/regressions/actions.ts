@@ -109,3 +109,39 @@ export async function investigateRegressionAction(
 
   return successResult("Regression alert marked as investigating.", "Alert updated");
 }
+
+export async function applyRecoveryAction(
+  _previousState: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireAuthSession();
+  const traReportId = String(formData.get("traReportId") ?? "");
+
+  if (!traReportId) {
+    return errorResult("TRA Report ID is required.");
+  }
+
+  const report = await prisma.traReport.findUnique({
+    where: { id: traReportId },
+    include: {
+      regressionAlert: true,
+    },
+  });
+
+  if (!report || report.regressionAlert.organizationId !== session.user.organizationId) {
+    return errorResult("TRA report not found.");
+  }
+
+  await enqueueBackgroundJob({
+    organizationId: session.user.organizationId,
+    projectId: report.regressionAlert.projectId,
+    jobType: "run-recovery-job",
+    payload: {
+      traReportId: report.id,
+    },
+  });
+
+  revalidatePath(`/regressions/${report.regressionAlertId}`);
+
+  return successResult("One-Click Recovery queued.", "Recovery started");
+}

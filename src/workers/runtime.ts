@@ -25,6 +25,7 @@ import { sendSlackMessage, type SlackMessage } from "../lib/slack";
 import { recordActivityEvent } from "../lib/workspace-data";
 import { workerLogger } from "./logger";
 import { handleRunTraAnalysisJob } from "./tra-worker";
+import { handleRunRecoveryJob } from "./recovery-worker";
 
 const env = getServerEnv();
 const POLL_TIMEOUT_COUNT = 2000;
@@ -1105,6 +1106,8 @@ export function createWorkerProcessor(jobType: BackgroundJobType) {
       return handleScoreDatasetJob;
     case "run-tra-analysis":
       return handleRunTraAnalysisJob;
+    case "run-recovery-job":
+      return handleRunRecoveryJob;
     case "launch-finetune":
       return handleLaunchFineTuneJob;
     case "poll-finetune":

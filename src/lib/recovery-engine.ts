@@ -1,0 +1,84 @@
+import { prisma } from "@/lib/prisma";
+
+export type RecoveryResult = {
+  newDatasetId: string;
+  removedCount: number;
+  removedExampleIndices: number[];
+};
+
+export async function runRecovery(traReportId: string): Promise<RecoveryResult> {
+  const traReport = await prisma.traReport.findUnique({
+    where: { id: traReportId },
+    include: {
+      suspiciousExamples: true,
+      regressionAlert: {
+        include: {
+          candidateRun: {
+            include: {
+              dataset: {
+                include: {
+                  examples: {
+                    orderBy: {
+                      createdAt: "asc",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!traReport || !traReport.regressionAlert.candidateRun.dataset) {
+    throw new Error("Cannot run recovery: TraReport or original dataset not found.");
+  }
+
+  const originalDataset = traReport.regressionAlert.candidateRun.dataset;
+  const suspiciousExamples = traReport.suspiciousExamples;
+
+  const removeIds = new Set(
+    suspiciousExamples
+      .filter((ex) => ex.confidence > 0.6)
+      .map((ex) => ex.exampleId)
+  );
+
+  const keepExamples = originalDataset.examples.filter((ex) => !removeIds.has(ex.id));
+
+  const removedExampleIndices = originalDataset.examples
+    .map((ex, idx) => (removeIds.has(ex.id) ? idx : -1))
+    .filter((idx) => idx !== -1);
+
+  const dateStr = new Date().toISOString().split("T")[0];
+  const newDatasetName = `${originalDataset.name} — recovered ${dateStr}`;
+
+  const newDataset = await prisma.dataset.create({
+    data: {
+      projectId: originalDataset.projectId,
+      name: newDatasetName,
+      version: `${originalDataset.version}-recovered`,
+      source: "One-Click Recovery",
+      status: "processing",
+      rowCount: keepExamples.length,
+    },
+  });
+
+  if (keepExamples.length > 0) {
+    await prisma.datasetExample.createMany({
+      data: keepExamples.map((ex) => ({
+        datasetId: newDataset.id,
+        sourceTraceId: ex.sourceTraceId,
+        inputText: ex.inputText,
+        outputText: ex.outputText,
+        metadata: ex.metadata,
+      })),
+    });
+  }
+
+  return {
+    newDatasetId: newDataset.id,
+    removedCount: removeIds.size,
+    removedExampleIndices,
+  };
+}

@@ -5,7 +5,7 @@ import { ActionForm, ActionSubmitButton } from "@/components/feedback/action-for
 import { requireAuthSession } from "@/lib/auth-session";
 import { formatPercent } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import { dismissRegressionAction, investigateRegressionAction } from "../actions";
+import { dismissRegressionAction, investigateRegressionAction, applyRecoveryAction } from "../actions";
 
 export default async function RegressionDetailPage({
   params,
@@ -29,6 +29,7 @@ export default async function RegressionDetailPage({
           suspiciousExamples: {
             orderBy: { confidence: "desc" },
           },
+          recoveryJob: true,
         },
       },
     },
@@ -106,6 +107,36 @@ export default async function RegressionDetailPage({
               <p className="muted mt-2">
                 Estimated recovery: +{alert.traReport.estimatedRecovery.toFixed(2)} to {alert.metric}
               </p>
+            </div>
+
+            <div className="panel mb-6">
+              <p className="eyebrow mb-4">One-Click Recovery</p>
+              {!alert.traReport.recoveryJob && (
+                <ActionForm action={applyRecoveryAction}>
+                  <input type="hidden" name="traReportId" value={alert.traReport.id} />
+                  <ActionSubmitButton idleLabel="Apply One-Click Recovery" pendingLabel="Starting Recovery..." />
+                </ActionForm>
+              )}
+              {(alert.traReport.recoveryJob?.status === "PENDING" || alert.traReport.recoveryJob?.status === "RUNNING") && (
+                <p className="muted">Recovery in progress... <span className="animate-pulse">⏳</span></p>
+              )}
+              {alert.traReport.recoveryJob?.status === "COMPLETE" && (
+                <div>
+                  <p className="text-green-600 mb-2">✓ Recovery complete</p>
+                  <Link href={`/datasets/${alert.traReport.recoveryJob.newDatasetId}`} className="button">
+                    View Cleaned Dataset
+                  </Link>
+                </div>
+              )}
+              {alert.traReport.recoveryJob?.status === "FAILED" && (
+                <div>
+                  <p className="text-red-600 mb-2">❌ Recovery failed: {alert.traReport.recoveryJob.error}</p>
+                  <ActionForm action={applyRecoveryAction}>
+                    <input type="hidden" name="traReportId" value={alert.traReport.id} />
+                    <ActionSubmitButton idleLabel="Retry Recovery" pendingLabel="Starting Recovery..." />
+                  </ActionForm>
+                </div>
+              )}
             </div>
             
             <p className="eyebrow mb-4">Top Suspicious Examples ({alert.traReport.suspiciousExamples.length})</p>

@@ -37,6 +37,12 @@ export type SlackMessage =
       confidence: number;
       rootCauseCategory: string;
       path?: string;
+    }
+  | {
+      type: "recovery_completed";
+      datasetId: string;
+      removedCount: number;
+      path?: string;
     };
 
 function normalizeChannel(channel: string) {
@@ -115,6 +121,19 @@ export function buildSlackPayload(message: SlackMessage) {
             text: {
               type: "mrkdwn",
               text: `:rotating_light: *Regression detected* - ${message.metric}\nSeverity: ${message.severity}\nTRA confidence: ${(message.confidence * 100).toFixed(1)}%\nLikely cause: ${message.rootCauseCategory}\nReview report: ${getMessageLink(message.path ?? "/regressions")}`,
+            },
+          },
+        ],
+      };
+    case "recovery_completed":
+      return {
+        text: `One-Click Recovery completed`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `:magic_wand: *Recovery completed*\nCleaned dataset created (${message.removedCount} examples removed).\nView in FinetuneOps: ${getMessageLink(message.path ?? "/datasets/" + message.datasetId)}`,
             },
           },
         ],

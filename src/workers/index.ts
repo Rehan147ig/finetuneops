@@ -27,6 +27,7 @@ const concurrencyByJob = {
   "score-dataset": 3,
   "run-experiment": 3,
   "run-tra-analysis": 2,
+  "run-recovery-job": 1,
   "launch-finetune": 2,
   "poll-finetune": 5,
   "send-notification": 5,

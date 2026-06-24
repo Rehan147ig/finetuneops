@@ -260,6 +260,8 @@ model Dataset {
   evalRuns     EvalRun[]
   examples     DatasetExample[]
   qualityReport DatasetQualityReport?
+  originalRecoveryJobs RecoveryJob[] @relation("RecoveryOriginalDataset")
+  newRecoveryJobs      RecoveryJob[] @relation("RecoveryNewDataset")
 
   @@index([projectId])
   @@index([status])
@@ -425,6 +427,7 @@ model TraReport {
   updatedAt          DateTime            @updatedAt
   regressionAlert    RegressionAlert     @relation(fields: [regressionAlertId], references: [id], onDelete: Cascade)
   suspiciousExamples SuspiciousExample[]
+  recoveryJob        RecoveryJob?
 
   @@index([rootCauseCategory])
   @@index([confidence])
@@ -666,5 +669,23 @@ model DatasetQualityReport {
 model HealthCheck {
   id        String   @id @default(cuid())
   checkedAt DateTime @default(now())
+}
+
+model RecoveryJob {
+  id                  String    @id @default(cuid())
+  traReportId         String    @unique
+  status              String    @default("PENDING")
+  originalDatasetId   String
+  newDatasetId        String?
+  removedExampleCount Int       @default(0)
+  error               String?   @db.Text
+  createdAt           DateTime  @default(now())
+  completedAt         DateTime?
+  traReport           TraReport @relation(fields: [traReportId], references: [id], onDelete: Cascade)
+  originalDataset     Dataset   @relation("RecoveryOriginalDataset", fields: [originalDatasetId], references: [id], onDelete: Cascade)
+  newDataset          Dataset?  @relation("RecoveryNewDataset", fields: [newDatasetId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([originalDatasetId])
 }
 

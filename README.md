@@ -104,17 +104,17 @@ Why it matters:
 Dashboards show symptoms. TRA should identify the training examples most
 likely responsible for the regression.
 
-### 3. One-Click Recovery - Missing
+### 3. One-Click Recovery - Built
 
 This is the magic moment.
 
-Missing today:
+Now built:
 
-- `RecoveryJob` model.
-- Action to remove suspicious examples from a dataset.
-- Automatic creation of a cleaned dataset version.
-- Background job to score the cleaned dataset.
-- Retraining trigger from a TRA report.
+- `RecoveryJob` model tracking recovery lifecycle.
+- Action to automatically remove high-confidence suspicious examples.
+- Background generation of a cleaned dataset version.
+- Slack notifications with direct links to the new dataset.
+- In-place UI updates via server actions.
 
 The intended user action:
 
@@ -174,7 +174,7 @@ These are the highest-leverage features to build next.
 | RegressionAlert schema and detection engine | Done | Core product wedge |
 | TRA Engine with 4 analysis techniques | Done | Main reason to pay $399/month |
 | TRA report UI | Done | Customer-visible proof and trust |
-| One-click recovery | 2 days | Magic moment |
+| One-click recovery | Done | Magic moment |
 | Fireworks and Together adapters | 1 day | Expands total addressable market |
 
 ## Recommended Build Order
