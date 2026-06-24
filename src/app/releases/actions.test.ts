@@ -128,7 +128,7 @@ describe("decideReviewLinkAction", () => {
     mockPrisma.reviewLink.findUnique.mockResolvedValue({
       id: "review_1",
       releaseId: "release_1",
-      expiresAt: new Date("2026-05-27T00:00:00.000Z"),
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       decidedAt: null,
       release: {
         projectId: "project_1",
