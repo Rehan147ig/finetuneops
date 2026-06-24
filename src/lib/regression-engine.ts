@@ -1,4 +1,5 @@
 import type { EvalRun, RegressionAlert } from "@prisma/client";
+import { enqueueBackgroundJob } from "@/lib/background-jobs";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
@@ -141,6 +142,26 @@ export async function createRegressionAlerts(input: {
         status: "open",
       },
     });
+
+    if (alert.severity === "warning" || alert.severity === "critical") {
+      try {
+        await enqueueBackgroundJob({
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          jobType: "run-tra-analysis",
+          payload: {
+            regressionAlertId: alert.id,
+          },
+          estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 5),
+        });
+      } catch (error) {
+        logger.warn({
+          event: "tra_analysis_enqueue_failed",
+          regressionAlertId: alert.id,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
 
     alerts.push(alert);
   }

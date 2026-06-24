@@ -88,6 +88,7 @@ vi.mock("../lib/background-jobs", () => ({
     "ingest-trace",
     "score-dataset",
     "run-experiment",
+    "run-tra-analysis",
     "launch-finetune",
     "poll-finetune",
     "send-notification",
@@ -130,6 +131,10 @@ vi.mock("resend", () => ({
 
 vi.mock("../lib/slack", () => ({
   sendSlackMessage,
+}));
+
+vi.mock("./tra-worker", () => ({
+  handleRunTraAnalysisJob: vi.fn(),
 }));
 
 vi.mock("../lib/regression-engine", () => ({

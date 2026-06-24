@@ -70,24 +70,25 @@ Why it matters:
 Teams do not just want to know that a model changed. They want to know
 which metric regressed, by how much, and whether the release should be blocked.
 
-### 2. TRA Engine - Missing
+### 2. TRA Engine - Built
 
 TRA means Training Regression Autopilot.
 
 This is the feature that can make customers pay more because it does not just
 detect a regression. It explains the likely cause.
 
-Missing today:
+Now built:
 
-- `src/lib/tra-engine.ts`.
-- Instruction conflict detection.
-- Label noise detection using LLM-as-judge.
-- Duplicate conflict detection.
-- Class imbalance correlation.
-- `TraReport` model.
-- `SuspiciousExample` model.
+- `src/lib/tra-engine.ts` with 4 analysis techniques:
+  - Instruction conflict detection.
+  - Label noise detection using LLM-as-judge.
+  - Duplicate conflict detection.
+  - Class imbalance correlation.
+- `TraReport` and `SuspiciousExample` models in Prisma.
+- `run-tra-analysis` worker.
+- `/regressions` UI for alerts and full TRA reports.
 
-The intended output:
+The intended output (now live):
 
 ```text
 Regression detected: billing_accuracy dropped from 87% to 63%.
@@ -171,8 +172,8 @@ These are the highest-leverage features to build next.
 | --- | ---: | --- |
 | Multi-metric EvalRun scores | Done | Blocker for regression detection |
 | RegressionAlert schema and detection engine | Done | Core product wedge |
-| TRA Engine with 4 analysis techniques | 4 days | Main reason to pay $399/month |
-| TRA report UI | 2 days | Customer-visible proof and trust |
+| TRA Engine with 4 analysis techniques | Done | Main reason to pay $399/month |
+| TRA report UI | Done | Customer-visible proof and trust |
 | One-click recovery | 2 days | Magic moment |
 | Fireworks and Together adapters | 1 day | Expands total addressable market |
 

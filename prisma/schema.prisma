@@ -397,13 +397,13 @@ model RegressionAlert {
   delta             Float
   severity          String       @default("warning")
   status            String       @default("open")
-  traReportId       String?      @unique
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   baselineRun       EvalRun      @relation("RegressionBaselineRun", fields: [baselineEvalRunId], references: [id], onDelete: Cascade)
   candidateRun      EvalRun      @relation("RegressionCandidateRun", fields: [candidateEvalRunId], references: [id], onDelete: Cascade)
+  traReport         TraReport?
 
   @@unique([baselineEvalRunId, candidateEvalRunId, metric])
   @@index([organizationId])
@@ -411,6 +411,44 @@ model RegressionAlert {
   @@index([status])
   @@index([severity])
   @@index([createdAt])
+}
+
+model TraReport {
+  id                 String              @id @default(cuid())
+  regressionAlertId  String              @unique
+  confidence         Float
+  rootCauseCategory  String
+  summary            String              @db.Text
+  recommendedAction  String              @db.Text
+  estimatedRecovery  Float
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  regressionAlert    RegressionAlert     @relation(fields: [regressionAlertId], references: [id], onDelete: Cascade)
+  suspiciousExamples SuspiciousExample[]
+
+  @@index([rootCauseCategory])
+  @@index([confidence])
+  @@index([createdAt])
+}
+
+model SuspiciousExample {
+  id             String    @id @default(cuid())
+  traReportId    String
+  exampleId      String
+  exampleIndex   Int
+  confidence     Float
+  reason         String    @db.Text
+  category       String
+  impactScore    Float
+  inputPreview   String?   @db.Text
+  outputPreview  String?   @db.Text
+  createdAt      DateTime  @default(now())
+  traReport      TraReport @relation(fields: [traReportId], references: [id], onDelete: Cascade)
+
+  @@index([traReportId])
+  @@index([category])
+  @@index([confidence])
+  @@index([impactScore])
 }
 
 model ModelRelease {

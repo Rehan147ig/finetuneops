@@ -4,10 +4,12 @@ const {
   mockEvalRunFindFirst,
   mockRegressionAlertUpsert,
   mockLoggerError,
+  mockEnqueueBackgroundJob,
 } = vi.hoisted(() => ({
   mockEvalRunFindFirst: vi.fn(),
   mockRegressionAlertUpsert: vi.fn(),
   mockLoggerError: vi.fn(),
+  mockEnqueueBackgroundJob: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -23,8 +25,13 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/logger", () => ({
   logger: {
+    warn: vi.fn(),
     error: mockLoggerError,
   },
+}));
+
+vi.mock("@/lib/background-jobs", () => ({
+  enqueueBackgroundJob: mockEnqueueBackgroundJob,
 }));
 
 function makeEvalRun(input: {
@@ -72,6 +79,7 @@ function makeAlert(metric = "accuracy") {
 describe("regression-engine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnqueueBackgroundJob.mockResolvedValue({ id: "bg_1" });
   });
 
   it("does not detect regression when candidate scores improve", async () => {
@@ -162,6 +170,14 @@ describe("regression-engine", () => {
             candidateEvalRunId: "eval_candidate",
             metric: "accuracy",
           },
+        },
+      }),
+    );
+    expect(mockEnqueueBackgroundJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobType: "run-tra-analysis",
+        payload: {
+          regressionAlertId: "alert_accuracy",
         },
       }),
     );

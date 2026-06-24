@@ -3,12 +3,14 @@ import { getServerEnv } from "@/lib/env";
 import { CacheKeys, invalidate } from "@/lib/cache";
 import { prisma } from "@/lib/prisma";
 import { buildDatasetQualityReport } from "@/lib/quality-engine";
+import { runTraAnalysis } from "@/lib/tra-engine";
 import { recordActivityEvent } from "@/lib/workspace-data";
 
 export const backgroundJobTypes = [
   "ingest-trace",
   "score-dataset",
   "run-experiment",
+  "run-tra-analysis",
   "launch-finetune",
   "poll-finetune",
   "send-notification",
@@ -440,6 +442,119 @@ async function runExperimentJob(backgroundJobId: string, payload: Record<string,
   });
 }
 
+async function runTraAnalysisJob(backgroundJobId: string, payload: Record<string, unknown>) {
+  const regressionAlertId = typeof payload.regressionAlertId === "string" ? payload.regressionAlertId : null;
+
+  if (!regressionAlertId) {
+    return failBackgroundJob({
+      backgroundJobId,
+      message: "TRA analysis could not start because regressionAlertId is missing.",
+    });
+  }
+
+  await updateBackgroundJobProgress({
+    backgroundJobId,
+    progress: 45,
+    status: "running",
+    message: "Running Training Regression Autopilot analysis.",
+    estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 3),
+  });
+
+  const alert = await prisma.regressionAlert.findUnique({
+    where: {
+      id: regressionAlertId,
+    },
+    include: {
+      candidateRun: {
+        include: {
+          dataset: {
+            include: {
+              examples: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!alert || !alert.candidateRun.dataset || alert.candidateRun.dataset.examples.length === 0) {
+    return failBackgroundJob({
+      backgroundJobId,
+      message: "TRA analysis failed because candidate dataset examples were unavailable.",
+    });
+  }
+
+  const analysis = await runTraAnalysis({
+    regressionMetric: alert.metric,
+    baselineScore: alert.baselineScore,
+    candidateScore: alert.candidateScore,
+    delta: alert.delta,
+    examples: alert.candidateRun.dataset.examples.map((example) => ({
+      id: example.id,
+      inputText: example.inputText,
+      outputText: example.outputText,
+      metadata: example.metadata,
+    })),
+  });
+
+  const report = await prisma.traReport.upsert({
+    where: {
+      regressionAlertId,
+    },
+    update: {
+      confidence: analysis.confidence,
+      rootCauseCategory: analysis.rootCauseCategory,
+      summary: analysis.summary,
+      recommendedAction: analysis.recommendedAction,
+      estimatedRecovery: analysis.estimatedRecovery,
+    },
+    create: {
+      regressionAlertId,
+      confidence: analysis.confidence,
+      rootCauseCategory: analysis.rootCauseCategory,
+      summary: analysis.summary,
+      recommendedAction: analysis.recommendedAction,
+      estimatedRecovery: analysis.estimatedRecovery,
+    },
+  });
+
+  await prisma.suspiciousExample.deleteMany({
+    where: {
+      traReportId: report.id,
+    },
+  });
+
+  if (analysis.suspiciousExamples.length > 0) {
+    await prisma.suspiciousExample.createMany({
+      data: analysis.suspiciousExamples.map((example) => ({
+        traReportId: report.id,
+        exampleId: example.exampleId,
+        exampleIndex: example.exampleIndex,
+        confidence: example.confidence,
+        reason: example.reason,
+        category: example.category,
+        impactScore: example.impactScore,
+        inputPreview: example.inputPreview ?? null,
+        outputPreview: example.outputPreview ?? null,
+      })),
+    });
+  }
+
+  return completeBackgroundJob({
+    backgroundJobId,
+    message: "TRA analysis completed and suspicious examples are ready.",
+    result: {
+      regressionAlertId,
+      traReportId: report.id,
+      suspiciousExamples: analysis.suspiciousExamples.length,
+    },
+  });
+}
+
 async function runLaunchFineTuneJob(backgroundJobId: string, payload: Record<string, unknown>) {
   const trainingJobId = typeof payload.trainingJobId === "string" ? payload.trainingJobId : null;
 
@@ -542,6 +657,8 @@ export async function processBackgroundJobById(backgroundJobId: string) {
       return runScoreDatasetJob(backgroundJobId, payload);
     case "run-experiment":
       return runExperimentJob(backgroundJobId, payload);
+    case "run-tra-analysis":
+      return runTraAnalysisJob(backgroundJobId, payload);
     case "launch-finetune":
       return runLaunchFineTuneJob(backgroundJobId, payload);
     case "send-notification":

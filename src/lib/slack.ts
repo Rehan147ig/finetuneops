@@ -29,6 +29,14 @@ export type SlackMessage =
       releaseName: string;
       pendingFor: string;
       path?: string;
+    }
+  | {
+      type: "regression_detected";
+      metric: string;
+      severity: string;
+      confidence: number;
+      rootCauseCategory: string;
+      path?: string;
     };
 
 function normalizeChannel(channel: string) {
@@ -94,6 +102,19 @@ export function buildSlackPayload(message: SlackMessage) {
             text: {
               type: "mrkdwn",
               text: `:clipboard: *Release pending review* - ${message.releaseName}\nWaiting for approval for ${message.pendingFor}\nReview now: ${getMessageLink(message.path ?? "/releases")}`,
+            },
+          },
+        ],
+      };
+    case "regression_detected":
+      return {
+        text: `Regression detected - ${message.metric}`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `:rotating_light: *Regression detected* - ${message.metric}\nSeverity: ${message.severity}\nTRA confidence: ${(message.confidence * 100).toFixed(1)}%\nLikely cause: ${message.rootCauseCategory}\nReview report: ${getMessageLink(message.path ?? "/regressions")}`,
             },
           },
         ],

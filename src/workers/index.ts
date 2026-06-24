@@ -26,6 +26,7 @@ const concurrencyByJob = {
   "ingest-trace": 10,
   "score-dataset": 3,
   "run-experiment": 3,
+  "run-tra-analysis": 2,
   "launch-finetune": 2,
   "poll-finetune": 5,
   "send-notification": 5,
