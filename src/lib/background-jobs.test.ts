@@ -231,39 +231,5 @@ describe("background jobs", () => {
     );
   });
 
-  it("processes a fine-tune launch job and updates the training job", async () => {
-    mockPrisma.backgroundJob.findUniqueOrThrow.mockResolvedValue({
-      id: "bg_train",
-      projectId: "project_1",
-      queueName: "finetuneops-background-jobs",
-      jobType: "launch-finetune",
-      payload: JSON.stringify({
-        trainingJobId: "train_1",
-      }),
-      startedAt: null,
-      estimatedCompletionAt: null,
-      logs: JSON.stringify(["Queued launch-finetune"]),
-    });
-    mockPrisma.trainingJob.findUnique.mockResolvedValue({
-      id: "train_1",
-      gpuHours: 0,
-      startedAt: null,
-    });
-    mockPrisma.trainingJob.update.mockResolvedValue({
-      id: "train_1",
-      status: "completed",
-    });
-    mockPrisma.backgroundJob.update.mockResolvedValue({
-      id: "bg_train",
-      status: "completed",
-    });
 
-    await processBackgroundJobById("bg_train");
-
-    expect(mockPrisma.trainingJob.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "train_1" },
-      }),
-    );
-  });
 });

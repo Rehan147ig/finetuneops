@@ -106,6 +106,11 @@ export type TrainingJobRecord = {
   pollCount?: number;
   progressNote?: string;
   completedModelId?: string;
+  autoEval?: {
+    id: string;
+    status: string;
+    score?: number;
+  };
 };
 
 export type BackgroundJobStatus = "Queued" | "Running" | "Completed" | "Failed";

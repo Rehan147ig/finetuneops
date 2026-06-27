@@ -56,8 +56,11 @@ describe("recovery-engine", () => {
     expect(prisma.dataset.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          name: expect.stringContaining("Original Dataset — recovered"),
-          rowCount: 2,
+          projectId: "proj_1",
+          name: expect.stringContaining("Original Dataset — cleaned"),
+          version: "v1-cleaned",
+          source: "One-Click Dataset Cleanup",
+          status: "processing",
         }),
       })
     );

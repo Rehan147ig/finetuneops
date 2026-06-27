@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 import {
   completeBackgroundJob,
+  enqueueBackgroundJob,
   failBackgroundJob,
   updateBackgroundJobProgress,
 } from "@/lib/background-jobs";
@@ -31,6 +32,7 @@ export async function handleRunRecoveryJob(job: Job<WorkerJobData>) {
           candidateRun: {
             include: {
               dataset: true,
+              trainingJob: true,
             }
           }
         }
@@ -46,10 +48,13 @@ export async function handleRunRecoveryJob(job: Job<WorkerJobData>) {
     throw new Error("Original dataset not found");
   }
 
-  const originalDatasetId = traReport.regressionAlert.candidateRun.dataset.id;
+  const originalDataset = traReport.regressionAlert.candidateRun.dataset;
+  const originalDatasetId = originalDataset.id;
 
-  const recoveryJob = await prisma.recoveryJob.create({
-    data: {
+  const recoveryJob = await prisma.recoveryJob.upsert({
+    where: { traReportId },
+    update: {},
+    create: {
       traReportId,
       originalDatasetId,
       status: "PENDING",
@@ -71,14 +76,56 @@ export async function handleRunRecoveryJob(job: Job<WorkerJobData>) {
 
     const result = await runRecovery(traReportId);
 
+    await updateBackgroundJobProgress({
+      backgroundJobId: job.data.backgroundJobId,
+      progress: 70,
+      status: "running",
+      message: "Clean dataset built. Queuing quality check and retrain.",
+    });
+
+    // 1) Score the clean dataset so the quality gate reflects the recovery.
+    await enqueueBackgroundJob({
+      organizationId: job.data.organizationId,
+      projectId: job.data.projectId ?? null,
+      jobType: "score-dataset",
+      payload: { datasetId: result.newDatasetId },
+      estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 3),
+    });
+
+    // 2) Create a retrain job on the clean dataset, copying the original
+    //    candidate's model base + provider so the comparison is apples-to-apples.
+    const candidateTrainingJob = traReport.regressionAlert.candidateRun.trainingJob;
+    const retrainJob = await prisma.trainingJob.create({
+      data: {
+        projectId: originalDataset.projectId,
+        datasetId: result.newDatasetId,
+        name: `${candidateTrainingJob?.name ?? "Fine-tune"} — recovered retrain`,
+        modelBase: candidateTrainingJob?.modelBase ?? "gpt-4o-mini",
+        provider: candidateTrainingJob?.provider ?? "OpenAI",
+        status: "queued",
+      },
+    });
+
+    // 3) Link the retrain job on the recovery record and mark RETRAINING so the
+    //    UI can show "retrain in progress" with a link to the job. The launch →
+    //    poll → auto-eval → regression-retest chain runs automatically afterwards.
     await prisma.recoveryJob.update({
       where: { id: recoveryJob.id },
       data: {
-        status: "COMPLETE",
+        status: "RETRAINING",
         newDatasetId: result.newDatasetId,
         removedExampleCount: result.removedCount,
+        retrainJobId: retrainJob.id,
         completedAt: new Date(),
       },
+    });
+
+    await enqueueBackgroundJob({
+      organizationId: job.data.organizationId,
+      projectId: job.data.projectId ?? null,
+      jobType: "launch-finetune",
+      payload: { trainingJobId: retrainJob.id },
+      estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 10),
     });
 
     await sendSlackMessage(job.data.organizationId, {
@@ -90,8 +137,8 @@ export async function handleRunRecoveryJob(job: Job<WorkerJobData>) {
 
     return completeBackgroundJob({
       backgroundJobId: job.data.backgroundJobId,
-      message: `Recovery completed. Removed ${result.removedCount} examples.`,
-      result,
+      message: `Recovery completed. Removed ${result.removedCount} examples and queued a retrain on the clean dataset.`,
+      result: { ...result, retrainJobId: retrainJob.id },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

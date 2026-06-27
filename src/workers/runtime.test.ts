@@ -318,7 +318,19 @@ describe("worker runtime", () => {
 
   it("launch-finetune worker fails cleanly with no credential", async () => {
     getActiveCredential.mockResolvedValue(null);
+    mockPrisma.trainingJob.findFirst.mockResolvedValue({
+      id: "train_1",
+      projectId: "project_1",
+      modelBase: "gpt-4o-mini",
+      provider: "OpenAI",
+      datasetId: "dataset_1",
+      dataset: {
+        examples: [{ inputText: "hi", outputText: "hello" }],
+      },
+      project: { id: "project_1" },
+    });
     mockPrisma.trainingJob.update.mockResolvedValue({ id: "train_1" });
+    mockPrisma.datasetQualityReport.findUnique.mockResolvedValue(null);
 
     await expect(
       handleLaunchFineTuneJob(
@@ -327,17 +339,17 @@ describe("worker runtime", () => {
           payload: { trainingJobId: "train_1" },
         }) as never,
       ),
-    ).rejects.toThrow("No OpenAI key configured");
+    ).rejects.toThrow("No openai key configured");
 
     expect(mockPrisma.trainingJob.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: "failed",
-          errorMessage: "No OpenAI key configured",
         }),
       }),
     );
   });
+
 
   it("launch-finetune fails cleanly with empty dataset", async () => {
     getActiveCredential.mockResolvedValue("openai-key");
@@ -427,6 +439,49 @@ describe("worker runtime", () => {
 
     expect(openAiFineTuningRetrieve).not.toHaveBeenCalled();
     expect(mockPrisma.trainingJob.update).not.toHaveBeenCalled();
+  });
+
+  it("poll-finetune marks the training job failed when no credential exists (M6)", async () => {
+    // Regression test for BUG M6: previously the poll handler threw without
+    // updating the TrainingJob, leaving it stuck in "running" forever.
+    mockPrisma.trainingJob.findFirst.mockResolvedValue({
+      id: "train_1",
+      status: "running",
+      project: { id: "project_1" },
+    });
+    mockPrisma.trainingJob.update.mockResolvedValueOnce({
+      id: "train_1",
+      projectId: "project_1",
+      name: "Refund finetune",
+      openaiJobId: "ftjob_123",
+      providerJobId: "ftjob_123",
+      provider: "OpenAI",
+      modelBase: "gpt-4o-mini",
+      pollCount: 1,
+    });
+    getActiveCredential.mockResolvedValue(null);
+
+    await expect(
+      handlePollFineTuneJob(
+        makeJob({
+          name: "poll-finetune",
+          payload: { trainingJobId: "train_1" },
+        }) as never,
+      ),
+    ).rejects.toThrow("No openai key configured");
+
+    // The key assertion: the TrainingJob itself is marked failed, not just the
+    // background job. Without this, the job re-polls forever in "running".
+    expect(mockPrisma.trainingJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "train_1" },
+        data: expect.objectContaining({
+          status: "failed",
+          finishedAt: expect.any(Date),
+          errorMessage: "No openai key configured",
+        }),
+      }),
+    );
   });
 
   it("poll-finetune increments pollCount and re-enqueues when running", async () => {

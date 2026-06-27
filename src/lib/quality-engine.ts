@@ -1,4 +1,8 @@
 import { estimateFineTuneCost } from "@/lib/cost-estimator";
+import nlp from "compromise";
+
+const DUPLICATE_SCAN_CAP = 3_000;
+
 
 export type QualityExample = {
   id: string;
@@ -20,7 +24,7 @@ export type LengthCheckResult = {
 
 export type PiiCheckResult = {
   detected: number;
-  categories: Record<"email" | "phone" | "ssn" | "credit_card", number>;
+  categories: Record<"email" | "phone" | "ssn" | "credit_card" | "person" | "organization" | "place", number>;
   flagged: Array<{ id: string; categories: string[] }>;
 };
 
@@ -63,7 +67,8 @@ export type DatasetQualityResult = {
   };
   recommendation: string;
   estimatedCost: number;
-  projectedSaving: number;
+  /** Whether the duplicate scan was limited to a sample due to dataset size. */
+  duplicateScanSampled: boolean;
 };
 
 function uniqueTrigrams(value: string) {
@@ -82,23 +87,29 @@ function uniqueTrigrams(value: string) {
   return grams;
 }
 
-function jaccardSimilarity(left: string, right: string) {
-  const leftGrams = uniqueTrigrams(left);
-  const rightGrams = uniqueTrigrams(right);
-  const intersection = [...leftGrams].filter((gram) => rightGrams.has(gram)).length;
-  const union = new Set([...leftGrams, ...rightGrams]).size;
-
-  return union === 0 ? 0 : intersection / union;
-}
-
 export function checkDuplicateDetection(examples: QualityExample[]): DuplicateCheckResult {
   const pairs: DuplicateCheckResult["pairs"] = [];
 
-  for (let leftIndex = 0; leftIndex < examples.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < examples.length; rightIndex += 1) {
-      const left = examples[leftIndex];
-      const right = examples[rightIndex];
-      const exact = left.input.trim() === right.input.trim();
+  // Cap O(n²) scan at DUPLICATE_SCAN_CAP rows to prevent OOM on large datasets.
+  const sampled = examples.length > DUPLICATE_SCAN_CAP;
+  const scanSet = sampled
+    ? examples.slice(0, DUPLICATE_SCAN_CAP)
+    : examples;
+
+  const processed = scanSet.map(ex => {
+    const trimmed = ex.input.trim();
+    return {
+      id: ex.id,
+      input: trimmed,
+      grams: uniqueTrigrams(trimmed),
+    };
+  });
+
+  for (let leftIndex = 0; leftIndex < processed.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < processed.length; rightIndex += 1) {
+      const left = processed[leftIndex];
+      const right = processed[rightIndex];
+      const exact = left.input === right.input;
 
       if (exact) {
         pairs.push({
@@ -110,7 +121,23 @@ export function checkDuplicateDetection(examples: QualityExample[]): DuplicateCh
         continue;
       }
 
-      const similarity = jaccardSimilarity(left.input, right.input);
+      const minSize = Math.min(left.grams.size, right.grams.size);
+      const maxSize = Math.max(left.grams.size, right.grams.size);
+      
+      if (maxSize > 0 && (minSize / maxSize) <= 0.9) {
+        continue;
+      }
+      
+      let intersectionSize = 0;
+      const smallestSet = left.grams.size < right.grams.size ? left.grams : right.grams;
+      const largestSet = left.grams.size < right.grams.size ? right.grams : left.grams;
+      for (const gram of smallestSet) {
+        if (largestSet.has(gram)) intersectionSize++;
+      }
+      
+      const unionSize = left.grams.size + right.grams.size - intersectionSize;
+      const similarity = unionSize === 0 ? 0 : intersectionSize / unionSize;
+
       if (similarity > 0.9) {
         pairs.push({
           leftId: left.id,
@@ -169,6 +196,9 @@ export function checkPiiDetection(examples: QualityExample[]): PiiCheckResult {
     phone: 0,
     ssn: 0,
     credit_card: 0,
+    person: 0,
+    organization: 0,
+    place: 0,
   };
   const flagged: PiiCheckResult["flagged"] = [];
 
@@ -176,11 +206,31 @@ export function checkPiiDetection(examples: QualityExample[]): PiiCheckResult {
     const haystack = `${example.input}\n${example.output ?? ""}`;
     const hits: string[] = [];
 
+    // 1. Regex checks
     for (const [category, regex] of Object.entries(regexMap) as Array<[keyof typeof regexMap, RegExp]>) {
       if (regex.test(haystack)) {
         categories[category] += 1;
         hits.push(category);
       }
+    }
+
+    // 2. NLP-based checks for Names, Orgs, Places (compromise)
+    try {
+      const doc = nlp(haystack);
+      if (doc.people().length > 0) {
+        categories.person += 1;
+        hits.push("person");
+      }
+      if (doc.organizations().length > 0) {
+        categories.organization += 1;
+        hits.push("organization");
+      }
+      if (doc.places().length > 0) {
+        categories.place += 1;
+        hits.push("place");
+      }
+    } catch {
+      // ignore NLP errors gracefully
     }
 
     if (hits.length > 0) {
@@ -299,7 +349,6 @@ export function calculateHealthScore(input: {
 export function generateRecommendation(input: {
   duplicates: DuplicateCheckResult;
   pii: PiiCheckResult;
-  projectedSaving: number;
 }) {
   const parts: string[] = [];
 
@@ -314,7 +363,7 @@ export function generateRecommendation(input: {
     return "Dataset looks healthy. Minor cleanup only.";
   }
 
-  return `${parts.join(" and ")} before training. Estimated saving: $${input.projectedSaving.toFixed(2)}`;
+  return `${parts.join(" and ")} before training to improve model efficiency.`;
 }
 
 export function buildDatasetQualityReport(examples: QualityExample[]) {
@@ -346,14 +395,6 @@ export function buildDatasetQualityReport(examples: QualityExample[]) {
     estimatedEpochs: 3,
     datasetQuality: healthScore,
   }).estimatedCost;
-  const cleanedExampleCount = Math.max(1, examples.length - flaggedIds.size);
-  const cleanedCost = estimateFineTuneCost({
-    datasetSize: cleanedExampleCount,
-    model: "gpt-4o-mini",
-    estimatedEpochs: 3,
-    datasetQuality: Math.min(100, healthScore + 8),
-  }).estimatedCost;
-  const projectedSaving = Number(Math.max(estimatedCost - cleanedCost, 0).toFixed(2));
 
   return {
     totalExamples: examples.length,
@@ -378,9 +419,8 @@ export function buildDatasetQualityReport(examples: QualityExample[]) {
     recommendation: generateRecommendation({
       duplicates,
       pii,
-      projectedSaving,
     }),
     estimatedCost,
-    projectedSaving,
+    duplicateScanSampled: examples.length > DUPLICATE_SCAN_CAP,
   } satisfies DatasetQualityResult;
 }

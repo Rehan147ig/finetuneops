@@ -1,5 +1,4 @@
 import { createServer, type Server } from "node:http";
-import OpenAI from "openai";
 import { Queue, type Job } from "bullmq";
 import { Resend } from "resend";
 import { z } from "zod";
@@ -15,6 +14,7 @@ import {
 import { incrementTraceUsage } from "../lib/billing-data";
 import { CacheKeys, invalidate } from "../lib/cache";
 import { getServerEnv } from "../lib/env";
+import { credentialProviderFor, getFineTuneProvider } from "../lib/finetune-provider";
 import { getActiveCredential } from "../lib/provider-credentials";
 import { prisma } from "../lib/prisma";
 import { getQueueStats } from "../lib/queue-monitor";
@@ -26,6 +26,7 @@ import { recordActivityEvent } from "../lib/workspace-data";
 import { workerLogger } from "./logger";
 import { handleRunTraAnalysisJob } from "./tra-worker";
 import { handleRunRecoveryJob } from "./recovery-worker";
+import { runAutoEval } from "../lib/auto-eval-engine";
 
 const env = getServerEnv();
 const POLL_TIMEOUT_COUNT = 2000;
@@ -84,45 +85,6 @@ export function buildFineTuneJsonl(examples: Array<{ inputText: string; outputTe
     .join("\n");
 }
 
-function createOpenAiClient(apiKey: string) {
-  return new OpenAI({
-    apiKey,
-    timeout: 5_000,
-  });
-}
-
-function createJsonlFile(jsonlContent: string) {
-  return new File([jsonlContent], "training.jsonl", {
-    type: "application/jsonl",
-  });
-}
-
-function extractValidationLoss(resultFiles: unknown): number | null {
-  if (!Array.isArray(resultFiles)) {
-    return null;
-  }
-
-  for (const resultFile of resultFiles) {
-    if (!resultFile || typeof resultFile !== "object") {
-      continue;
-    }
-
-    const fileRecord = resultFile as {
-      validation_loss?: unknown;
-      metrics?: { validation_loss?: unknown };
-    };
-
-    if (typeof fileRecord.validation_loss === "number") {
-      return fileRecord.validation_loss;
-    }
-
-    if (typeof fileRecord.metrics?.validation_loss === "number") {
-      return fileRecord.metrics.validation_loss;
-    }
-  }
-
-  return null;
-}
 
 function getNotificationReferenceId(payload: Record<string, unknown>, fallbackId: string) {
   const referenceId = payload.trainingJobId ?? payload.datasetId ?? payload.releaseId;
@@ -422,7 +384,7 @@ export async function handleScoreDatasetJob(job: Job<WorkerJobData>) {
         details: report.details,
         recommendation: report.recommendation,
         estimatedCost: report.estimatedCost,
-        projectedSaving: report.projectedSaving,
+        duplicateScanSampled: report.duplicateScanSampled,
       },
       create: {
         datasetId,
@@ -440,7 +402,7 @@ export async function handleScoreDatasetJob(job: Job<WorkerJobData>) {
         details: report.details,
         recommendation: report.recommendation,
         estimatedCost: report.estimatedCost,
-        projectedSaving: report.projectedSaving,
+        duplicateScanSampled: report.duplicateScanSampled,
       },
     });
 
@@ -501,27 +463,11 @@ export async function handleLaunchFineTuneJob(job: Job<WorkerJobData>) {
       throw new Error("trainingJobId is required");
     }
 
-    const apiKey = await getActiveCredential(currentJob.data.organizationId, "openai");
-    if (!apiKey) {
-      await prisma.trainingJob.update({
-        where: {
-          id: trainingJobId,
-        },
-        data: {
-          status: "failed",
-          errorMessage: "No OpenAI key configured",
-          finishedAt: new Date(),
-          progressNote: "No OpenAI key configured",
-        },
-      });
-      throw new Error("No OpenAI key configured");
-    }
-
     await updateBackgroundJobProgress({
       backgroundJobId: currentJob.data.backgroundJobId,
       progress: 25,
       status: "running",
-      message: "Exporting dataset examples to OpenAI JSONL format.",
+      message: "Loading training job and dataset for fine-tune launch.",
       estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 8),
     });
 
@@ -600,14 +546,30 @@ export async function handleLaunchFineTuneJob(job: Job<WorkerJobData>) {
       ? `Warning: dataset scored ${qualityReport.healthScore}/100.`
       : null;
 
-    const openai = createOpenAiClient(apiKey);
-    const uploadedFile = await openai.files.create({
-      file: createJsonlFile(jsonlContent),
-      purpose: "fine-tune",
-    });
-    const fineTuneJob = await openai.fineTuning.jobs.create({
-      training_file: uploadedFile.id,
-      model: trainingJob.modelBase || "gpt-4o-mini",
+    const trainingJobProvider = trainingJob.provider || "OpenAI";
+    const credentialProvider = credentialProviderFor(trainingJobProvider);
+    const apiKey = await getActiveCredential(currentJob.data.organizationId, credentialProvider);
+    if (!apiKey) {
+      await prisma.trainingJob.update({
+        where: {
+          id: trainingJobId,
+        },
+        data: {
+          status: "failed",
+          errorMessage: `No ${credentialProvider} key configured`,
+          finishedAt: new Date(),
+          progressNote: `No ${credentialProvider} key configured`,
+        },
+      });
+      throw new Error(`No ${credentialProvider} key configured`);
+    }
+
+    const provider = getFineTuneProvider(trainingJobProvider);
+    const launchResult = await provider.launchFineTune({
+      apiKey,
+      jsonlContent,
+      modelBase: trainingJob.modelBase || "gpt-4o-mini",
+      datasetName: trainingJob.name,
     });
 
     await prisma.trainingJob.update({
@@ -615,22 +577,25 @@ export async function handleLaunchFineTuneJob(job: Job<WorkerJobData>) {
         id: trainingJobId,
       },
       data: {
-        provider: "OpenAI",
+        provider: trainingJobProvider,
         status: "running",
         progress: 15,
-        openaiFileId: uploadedFile.id,
-        openaiJobId: fineTuneJob.id,
-        providerJobId: fineTuneJob.id,
+        openaiFileId: launchResult.trainingFileId ?? null,
+        openaiJobId: launchResult.providerJobId,
+        providerJobId: launchResult.providerJobId,
         pollCount: 0,
-        checkpoint: `OpenAI training file ${uploadedFile.id}`,
+        checkpoint: launchResult.trainingFileId
+          ? `${trainingJobProvider} training file ${launchResult.trainingFileId}`
+          : `${trainingJobProvider} job submitted`,
         progressNote: qualityWarning
-          ? `${qualityWarning} Submitted to OpenAI.`
-          : "Submitted to OpenAI.",
+          ? `${qualityWarning} Submitted to ${trainingJobProvider}.`
+          : `Submitted to ${trainingJobProvider}.`,
         startedAt: new Date(),
         errorMessage: null,
         providerMetadata: {
-          trainingFileId: uploadedFile.id,
-          initialStatus: fineTuneJob.status,
+          trainingFileId: launchResult.trainingFileId ?? null,
+          initialStatus: launchResult.initialStatus,
+          provider: trainingJobProvider,
           qualityWarning,
         },
       },
@@ -638,9 +603,10 @@ export async function handleLaunchFineTuneJob(job: Job<WorkerJobData>) {
 
     workerLogger.info({
       event: "finetune_submitted",
+      provider: trainingJobProvider,
       workspaceId: currentJob.data.organizationId,
       jobId: trainingJobId,
-      openaiJobId: fineTuneJob.id,
+      providerJobId: launchResult.providerJobId,
     });
 
     await enqueueBackgroundJob({
@@ -656,10 +622,10 @@ export async function handleLaunchFineTuneJob(job: Job<WorkerJobData>) {
 
     return completeBackgroundJob({
       backgroundJobId: currentJob.data.backgroundJobId,
-      message: "Fine-tune was submitted to OpenAI and polling has started.",
+      message: `Fine-tune was submitted to ${trainingJobProvider} and polling has started.`,
       result: {
         trainingJobId,
-        openaiJobId: fineTuneJob.id,
+        providerJobId: launchResult.providerJobId,
       },
     });
   });
@@ -721,7 +687,11 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         projectId: true,
         name: true,
         openaiJobId: true,
+        providerJobId: true,
+        provider: true,
+        modelBase: true,
         pollCount: true,
+        datasetId: true,
       },
     });
 
@@ -757,27 +727,46 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
       };
     }
 
-    if (!incrementedJob.openaiJobId) {
-      throw new Error("OpenAI job id missing");
+    const providerJobId = incrementedJob.providerJobId ?? incrementedJob.openaiJobId;
+    if (!providerJobId) {
+      throw new Error("Provider job id missing");
     }
 
-    const apiKey = await getActiveCredential(currentJob.data.organizationId, "openai");
+    const jobProvider = incrementedJob.provider || "OpenAI";
+    const credentialProvider = credentialProviderFor(jobProvider);
+    const apiKey = await getActiveCredential(currentJob.data.organizationId, credentialProvider);
     if (!apiKey) {
-      throw new Error("No OpenAI key configured");
+      const errorMessage = `No ${credentialProvider} key configured`;
+      // Record the failure on the TrainingJob itself so it does not stay stuck
+      // in "running" and re-poll forever. (BUG M6 fix.)
+      await prisma.trainingJob.update({
+        where: { id: incrementedJob.id },
+        data: {
+          status: "failed",
+          finishedAt: new Date(),
+          errorMessage,
+          progressNote: errorMessage,
+        },
+      });
+      throw new Error(errorMessage);
     }
 
     await updateBackgroundJobProgress({
       backgroundJobId: currentJob.data.backgroundJobId,
       progress: 45,
       status: "running",
-      message: "Polling OpenAI fine-tune status.",
+      message: `Polling ${jobProvider} fine-tune status.`,
       estimatedCompletionAt: new Date(Date.now() + 1000 * 60),
     });
 
-    const openai = createOpenAiClient(apiKey);
-    const fineTuneJob = await openai.fineTuning.jobs.retrieve(incrementedJob.openaiJobId);
+    const provider = getFineTuneProvider(jobProvider);
+    const pollResult = await provider.pollFineTune({
+      apiKey,
+      providerJobId,
+      modelBase: incrementedJob.modelBase || "gpt-4o-mini",
+    });
 
-    if (["validating_files", "queued", "running"].includes(fineTuneJob.status)) {
+    if (pollResult.status === "running") {
       await prisma.trainingJob.update({
         where: {
           id: incrementedJob.id,
@@ -785,10 +774,10 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         data: {
           status: "running",
           progress: 45,
-          progressNote: `OpenAI status: ${fineTuneJob.status}`,
+          progressNote: `${jobProvider} status: ${pollResult.rawStatus}`,
           providerMetadata: {
-            fineTuneStatus: fineTuneJob.status,
-            trainedTokens: fineTuneJob.trained_tokens ?? 0,
+            fineTuneStatus: pollResult.rawStatus,
+            trainedTokens: pollResult.trainedTokens ?? 0,
           },
         },
       });
@@ -809,14 +798,13 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         message: "Fine-tune is still running; another polling cycle was queued.",
         result: {
           trainingJobId,
-          status: fineTuneJob.status,
+          status: pollResult.rawStatus,
           pollCount: incrementedJob.pollCount,
         },
       });
     }
 
-    if (fineTuneJob.status === "succeeded") {
-      const validationLoss = extractValidationLoss(fineTuneJob.result_files);
+    if (pollResult.status === "succeeded") {
       await prisma.trainingJob.update({
         where: {
           id: incrementedJob.id,
@@ -824,53 +812,72 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         data: {
           status: "completed",
           progress: 100,
-          completedModelId: fineTuneJob.fine_tuned_model ?? null,
-          fineTunedModelId: fineTuneJob.fine_tuned_model ?? null,
-          trainedTokens: fineTuneJob.trained_tokens ?? null,
-          validationLoss,
+          completedModelId: pollResult.fineTunedModelId ?? null,
+          fineTunedModelId: pollResult.fineTunedModelId ?? null,
+          trainedTokens: pollResult.trainedTokens ?? null,
+          validationLoss: pollResult.validationLoss ?? null,
           finishedAt: new Date(),
           errorMessage: null,
           progressNote: "Training complete",
           providerMetadata: {
-            fineTuneStatus: fineTuneJob.status,
-            trainedTokens: fineTuneJob.trained_tokens ?? 0,
-            resultFiles: fineTuneJob.result_files ?? [],
-            validationLoss,
+            fineTuneStatus: pollResult.rawStatus,
+            trainedTokens: pollResult.trainedTokens ?? 0,
+            validationLoss: pollResult.validationLoss ?? null,
           },
         },
       });
 
-      const latestCompletedEval = await prisma.evalRun.findFirst({
-        where: {
-          projectId: incrementedJob.projectId,
-          status: "completed",
-          OR: [
-            {
-              jobId: trainingJobId,
-            },
-            {
-              jobId: incrementedJob.id,
-            },
-          ],
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      }) ?? await prisma.evalRun.findFirst({
-        where: {
-          projectId: incrementedJob.projectId,
-          status: "completed",
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
+      let latestEvalRunId: string | undefined;
 
-      if (latestCompletedEval) {
+      try {
+        if (incrementedJob.datasetId && pollResult.fineTunedModelId) {
+          const autoEvalResult = await runAutoEval({
+            projectId: incrementedJob.projectId,
+            trainingJobId: incrementedJob.id,
+            datasetId: incrementedJob.datasetId,
+            modelId: pollResult.fineTunedModelId,
+            organizationId: currentJob.data.organizationId,
+          });
+
+          if (autoEvalResult.score > 0) {
+            latestEvalRunId = autoEvalResult.evalRunId;
+          }
+        }
+      } catch (error) {
+        workerLogger.error({
+          event: "auto_eval_failed",
+          trainingJobId: incrementedJob.id,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+
+      if (!latestEvalRunId) {
+        const fallbackEval = await prisma.evalRun.findFirst({
+          where: {
+            projectId: incrementedJob.projectId,
+            status: "completed",
+            OR: [
+              { jobId: trainingJobId },
+              { jobId: incrementedJob.id },
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+        }) ?? await prisma.evalRun.findFirst({
+          where: {
+            projectId: incrementedJob.projectId,
+            status: "completed",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        latestEvalRunId = fallbackEval?.id;
+      }
+
+      if (latestEvalRunId) {
         const regressionAlerts = await autoDetectRegressionAfterEval({
           organizationId: currentJob.data.organizationId,
           projectId: incrementedJob.projectId,
-          evalRunId: latestCompletedEval.id,
+          evalRunId: latestEvalRunId,
         });
 
         if (regressionAlerts.length > 0) {
@@ -881,7 +888,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
             userId: "system",
             metadata: {
               trainingJobId,
-              evalRunId: latestCompletedEval.id,
+              evalRunId: latestEvalRunId,
               alertCount: regressionAlerts.length,
             },
           });
@@ -905,7 +912,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         userId: "system",
         metadata: {
           trainingJobId,
-          providerJobId: incrementedJob.openaiJobId,
+          providerJobId,
         },
       });
 
@@ -914,12 +921,12 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         message: "Fine-tune polling confirmed the run completed successfully.",
         result: {
           trainingJobId,
-          modelId: fineTuneJob.fine_tuned_model ?? null,
+          modelId: pollResult.fineTunedModelId ?? null,
         },
       });
     }
 
-    if (fineTuneJob.status === "cancelled") {
+    if (pollResult.status === "failed" && pollResult.rawStatus === "cancelled") {
       await prisma.trainingJob.update({
         where: {
           id: incrementedJob.id,
@@ -929,7 +936,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
           finishedAt: new Date(),
           progressNote: "Training cancelled",
           providerMetadata: {
-            fineTuneStatus: fineTuneJob.status,
+            fineTuneStatus: pollResult.rawStatus,
           },
         },
       });
@@ -944,7 +951,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
       });
     }
 
-    const errorMessage = fineTuneJob.error?.message ?? "Fine-tune failed";
+    const errorMessage = pollResult.errorMessage ?? "Fine-tune failed";
     await prisma.trainingJob.update({
       where: {
         id: incrementedJob.id,
@@ -955,7 +962,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
         errorMessage,
         progressNote: errorMessage,
         providerMetadata: {
-          fineTuneStatus: fineTuneJob.status,
+          fineTuneStatus: pollResult.rawStatus,
         },
       },
     });
@@ -974,7 +981,7 @@ export async function handlePollFineTuneJob(job: Job<WorkerJobData>) {
     await recordActivityEvent({
       projectId: incrementedJob.projectId,
       type: "fine_tune_failed",
-      message: `${incrementedJob.name} failed in OpenAI with: ${errorMessage}`,
+      message: `${incrementedJob.name} failed in ${jobProvider} with: ${errorMessage}`,
       userId: "system",
       metadata: {
         trainingJobId,

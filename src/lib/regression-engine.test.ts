@@ -10,6 +10,7 @@ const {
   mockRegressionAlertUpsert: vi.fn(),
   mockLoggerError: vi.fn(),
   mockEnqueueBackgroundJob: vi.fn(),
+  mockProjectFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -19,6 +20,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     regressionAlert: {
       upsert: mockRegressionAlertUpsert,
+    },
+    project: {
+      findUnique: mockProjectFindUnique,
     },
   },
 }));
@@ -187,6 +191,7 @@ describe("regression-engine", () => {
     mockEvalRunFindFirst
       .mockResolvedValueOnce(makeEvalRun({ id: "eval_candidate" }))
       .mockResolvedValueOnce(null);
+    mockProjectFindUnique.mockResolvedValue({ regressionThresholds: null });
 
     const { autoDetectRegressionAfterEval } = await import("./regression-engine");
     const alerts = await autoDetectRegressionAfterEval({
@@ -211,6 +216,7 @@ describe("regression-engine", () => {
         scores: { accuracy: 0.9 },
         createdAt: new Date("2026-04-23T12:00:00.000Z"),
       }));
+    mockProjectFindUnique.mockResolvedValue({ regressionThresholds: null });
     mockRegressionAlertUpsert.mockResolvedValue(makeAlert("accuracy"));
 
     const { autoDetectRegressionAfterEval } = await import("./regression-engine");

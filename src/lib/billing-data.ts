@@ -86,25 +86,31 @@ export async function enforceTraceLimit(organizationId: string) {
   return getTraceUsageDecision(organization.billingPlan, usage);
 }
 
-export async function incrementTraceUsage(organizationId: string) {
+export async function incrementTraceUsage(organizationId: string, count: number = 1) {
   const { organization, usage } = await getOrCreateBillingUsage(organizationId);
   const plan = getBillingPlan(organization.billingPlan);
-  const updated = await prisma.billingUsage.update({
-    where: {
-      id: usage.id,
-    },
-    data: {
-      planId: organization.billingPlan,
-      tracesUsed: {
-        increment: 1,
-      },
-      overageTraces:
-        plan.allowOverage && usage.tracesUsed + 1 > plan.includedTraces
-          ? {
-              increment: 1,
-            }
-          : undefined,
-    },
+  
+  if (plan.allowOverage) {
+    await prisma.$executeRaw`
+      UPDATE "BillingUsage"
+      SET 
+        "tracesUsed" = "tracesUsed" + ${count},
+        "overageTraces" = GREATEST(0, "tracesUsed" + ${count} - ${plan.includedTraces}),
+        "planId" = ${organization.billingPlan}
+      WHERE "id" = ${usage.id}
+    `;
+  } else {
+    await prisma.$executeRaw`
+      UPDATE "BillingUsage"
+      SET 
+        "tracesUsed" = "tracesUsed" + ${count},
+        "planId" = ${organization.billingPlan}
+      WHERE "id" = ${usage.id}
+    `;
+  }
+
+  const updated = await prisma.billingUsage.findUniqueOrThrow({
+    where: { id: usage.id }
   });
 
   if (shouldSendUsageWarning(updated, organization.billingPlan)) {

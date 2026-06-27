@@ -467,7 +467,14 @@ export async function getWorkspaceData(scope?: WorkspaceScope): Promise<Workspac
         },
         datasets: true,
         experiments: true,
-        trainingJobs: true,
+        trainingJobs: {
+          include: {
+            evalRuns: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
         backgroundJobs: {
           orderBy: {
             createdAt: "desc",
@@ -594,6 +601,11 @@ export async function getWorkspaceData(scope?: WorkspaceScope): Promise<Workspac
         pollCount: item.pollCount,
         progressNote: item.progressNote ?? undefined,
         completedModelId: item.completedModelId ?? item.fineTunedModelId ?? undefined,
+        autoEval: item.evalRuns?.[0] ? {
+          id: item.evalRuns[0].id,
+          status: item.evalRuns[0].status,
+          score: item.evalRuns[0].score ?? undefined,
+        } : undefined,
       })),
       backgroundJobs: project.backgroundJobs.map((item) => ({
         id: item.id,

@@ -126,6 +126,7 @@ model Project {
   slug           String
   description    String?
   status         String        @default("active")
+  regressionThresholds Json?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -240,6 +241,7 @@ model TraceEvent {
   @@index([projectId, capturedAt])
   @@index([status])
   @@index([projectId, status])
+  @@index([opportunityScore])
 }
 
 model Dataset {
@@ -326,6 +328,8 @@ model TrainingJob {
   dataset        Dataset?      @relation(fields: [datasetId], references: [id], onDelete: SetNull)
   experiment     ExperimentRun? @relation(fields: [experimentId], references: [id], onDelete: SetNull)
   releases       ModelRelease[]
+  evalRuns       EvalRun[]
+  recoveryRetrainJobs RecoveryJob[] @relation("RecoveryRetrainJob")
 
   @@index([projectId])
   @@index([projectId, createdAt])
@@ -375,8 +379,11 @@ model EvalRun {
   judge      String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+  trainingJobId String?
+  modelId    String?
   project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dataset    Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  trainingJob TrainingJob? @relation(fields: [trainingJobId], references: [id], onDelete: SetNull)
   baselineAlerts RegressionAlert[] @relation("RegressionBaselineRun")
   candidateAlerts RegressionAlert[] @relation("RegressionCandidateRun")
 
@@ -385,6 +392,8 @@ model EvalRun {
   @@index([status])
   @@index([projectId, status])
   @@index([datasetId])
+  @@index([jobId])
+  @@index([trainingJobId])
 }
 
 model RegressionAlert {
@@ -422,7 +431,7 @@ model TraReport {
   rootCauseCategory  String
   summary            String              @db.Text
   recommendedAction  String              @db.Text
-  estimatedRecovery  Float
+  impactRating       String
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   regressionAlert    RegressionAlert     @relation(fields: [regressionAlertId], references: [id], onDelete: Cascade)
@@ -659,7 +668,7 @@ model DatasetQualityReport {
   details         Json
   recommendation  String
   estimatedCost   Float
-  projectedSaving Float
+  duplicateScanSampled Boolean @default(false)
   createdAt       DateTime @default(now())
   dataset         Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
 
@@ -678,12 +687,14 @@ model RecoveryJob {
   originalDatasetId   String
   newDatasetId        String?
   removedExampleCount Int       @default(0)
+  retrainJobId        String?
   error               String?   @db.Text
   createdAt           DateTime  @default(now())
   completedAt         DateTime?
   traReport           TraReport @relation(fields: [traReportId], references: [id], onDelete: Cascade)
   originalDataset     Dataset   @relation("RecoveryOriginalDataset", fields: [originalDatasetId], references: [id], onDelete: Cascade)
   newDataset          Dataset?  @relation("RecoveryNewDataset", fields: [newDatasetId], references: [id], onDelete: SetNull)
+  retrainJob          TrainingJob? @relation("RecoveryRetrainJob", fields: [retrainJobId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([originalDatasetId])

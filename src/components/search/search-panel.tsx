@@ -33,14 +33,15 @@ export function SearchPanel({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      setError("");
-      return;
-    }
-
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
+      if (!query.trim()) {
+        setResults([]);
+        setError("");
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError("");
 

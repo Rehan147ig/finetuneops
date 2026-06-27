@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { decryptKey, encryptKey } from "@/lib/encryption";
 
-export const providerNames = ["openai", "anthropic", "huggingface"] as const;
+export const providerNames = ["openai", "anthropic", "huggingface", "fireworks", "together"] as const;
 
 export type ProviderName = (typeof providerNames)[number];
 
@@ -148,6 +148,36 @@ async function verifyProviderCredential(provider: ProviderName, apiKey: string) 
     }
     case "huggingface": {
       const response = await fetchWithTimeout("https://huggingface.co/api/whoami-v2", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+
+      return response.ok
+        ? { ok: true as const }
+        : { ok: false as const, error: "Invalid API key" };
+    }
+    case "fireworks": {
+      // Fireworks exposes an OpenAI-compatible API; /v1/models is the documented,
+      // lightweight authenticated endpoint. A valid key returns 200, an invalid
+      // one returns 401. (There is no dedicated "verify key" endpoint.)
+      const response = await fetchWithTimeout("https://api.fireworks.ai/inference/v1/models", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+
+      return response.ok
+        ? { ok: true as const }
+        : { ok: false as const, error: "Invalid API key" };
+    }
+    case "together": {
+      // Together exposes an OpenAI-compatible API; /v1/models is the documented,
+      // lightweight authenticated endpoint. A valid key returns 200, an invalid
+      // one returns 401. (There is no dedicated "verify key" endpoint.)
+      const response = await fetchWithTimeout("https://api.together.xyz/v1/models", {
         method: "GET",
         headers: {
           Authorization: `Bearer ${apiKey}`,

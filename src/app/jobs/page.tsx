@@ -126,6 +126,11 @@ export default async function JobsPage() {
                   {job.completedModelId ? (
                     <span className="pill">Model: {job.completedModelId}</span>
                   ) : null}
+                  {job.autoEval ? (
+                    <span className={`pill ${job.autoEval.status === "failed" ? "danger" : job.autoEval.status === "completed" ? "success" : ""}`}>
+                      Auto-Eval: {job.autoEval.status} {job.autoEval.score ? `(${job.autoEval.score}%)` : ""}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="progress-track">
                   <div className="progress-fill" style={{ width: `${job.progress}%` }} />

@@ -4,6 +4,10 @@ import { buildDemoWorkspaceSeed } from "./demo-workspace.mjs";
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.recoveryJob.deleteMany();
+  await prisma.suspiciousExample.deleteMany();
+  await prisma.traReport.deleteMany();
+  await prisma.regressionAlert.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.reviewLink.deleteMany();
   await prisma.modelRelease.deleteMany();
@@ -111,6 +115,18 @@ async function main() {
     },
   });
 
+  // The regressed candidate job — trained on the messy backlog dataset.
+  const backlogDataset =
+    datasets.find((dataset) => dataset.status === "needs_review") ?? datasets[0];
+  const regressedJob = await prisma.trainingJob.create({
+    data: {
+      projectId: project.id,
+      datasetId: backlogDataset.id,
+      experimentId: completedExperiment.id,
+      ...demo.trainingJobs[1],
+    },
+  });
+
   await prisma.backgroundJob.createMany({
     data: demo.backgroundJobs.map((job) => ({
       organizationId: organization.id,
@@ -133,6 +149,88 @@ async function main() {
       datasetId: datasets[index]?.id ?? readyDataset.id,
       ...evalRun,
     })),
+  });
+
+  // --- Planted regression chain (the product's core demo moment) ---
+  // baseline run → candidate run → RegressionAlert → TraReport → SuspiciousExamples.
+  // The suspicious examples are linked to the REAL DatasetExample rows in the
+  // backlog dataset so the UI can show actual input/output previews.
+  const backlogExamples = await prisma.datasetExample.findMany({
+    where: { datasetId: backlogDataset.id },
+    orderBy: { createdAt: "asc" },
+  });
+  const backlogExampleByIndex = new Map(backlogExamples.map((ex, i) => [i, ex]));
+
+  const baselineRun = await prisma.evalRun.create({
+    data: {
+      projectId: project.id,
+      name: demo.regression.baseline.name,
+      benchmark: demo.regression.baseline.benchmark,
+      status: demo.regression.baseline.status,
+      score: demo.regression.baseline.score,
+      judge: demo.regression.baseline.judge,
+      modelId: demo.regression.baseline.modelId,
+      createdAt: demo.regression.baseline.runAt,
+    },
+  });
+
+  const candidateRun = await prisma.evalRun.create({
+    data: {
+      projectId: project.id,
+      trainingJobId: regressedJob.id,
+      modelId: demo.regression.candidate.modelId,
+      name: demo.regression.candidate.name,
+      benchmark: demo.regression.candidate.benchmark,
+      status: demo.regression.candidate.status,
+      score: demo.regression.candidate.score,
+      delta: demo.regression.candidate.delta,
+      judge: demo.regression.candidate.judge,
+      createdAt: demo.regression.candidate.runAt,
+    },
+  });
+
+  const regressionAlert = await prisma.regressionAlert.create({
+    data: {
+      organizationId: organization.id,
+      projectId: project.id,
+      baselineEvalRunId: baselineRun.id,
+      candidateEvalRunId: candidateRun.id,
+      metric: demo.regression.alert.metric,
+      baselineScore: demo.regression.alert.baselineScore,
+      candidateScore: demo.regression.alert.candidateScore,
+      delta: demo.regression.alert.delta,
+      severity: demo.regression.alert.severity,
+      status: demo.regression.alert.status,
+      createdAt: demo.regression.alert.createdAt,
+    },
+  });
+
+  const traReport = await prisma.traReport.create({
+    data: {
+      regressionAlertId: regressionAlert.id,
+      confidence: demo.regression.traReport.confidence,
+      rootCauseCategory: demo.regression.traReport.rootCauseCategory,
+      summary: demo.regression.traReport.summary,
+      recommendedAction: demo.regression.traReport.recommendedAction,
+      estimatedRecovery: demo.regression.traReport.estimatedRecovery,
+    },
+  });
+
+  await prisma.suspiciousExample.createMany({
+    data: demo.regression.traReport.suspiciousExamples.map((ex) => {
+      const datasetExample = backlogExampleByIndex.get(ex.exampleIndex);
+      return {
+        traReportId: traReport.id,
+        exampleId: datasetExample?.id ?? "demo-missing-example",
+        exampleIndex: ex.exampleIndex,
+        confidence: ex.confidence,
+        reason: ex.reason,
+        category: ex.category,
+        impactScore: ex.impactScore,
+        inputPreview: datasetExample?.inputText ?? null,
+        outputPreview: datasetExample?.outputText ?? null,
+      };
+    }),
   });
 
   const pendingRelease = await prisma.modelRelease.create({

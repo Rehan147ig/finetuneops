@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How FinetuneOps Works — Operation Visualization</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg-2: #0f1525;
+    --panel: #141b2e;
+    --panel-2: #1a2238;
+    --border: #232c44;
+    --text: #e6ebf5;
+    --muted: #8a96b4;
+    --accent: #4f8cff;
+    --accent-2: #38e8c8;
+    --warn: #ffb020;
+    --danger: #ff5c7c;
+    --good: #38e8a0;
+    --purple: #9b7cff;
+    --shadow: 0 8px 30px rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(900px 500px at 85% -5%, rgba(79,140,255,0.10), transparent 60%),
+      radial-gradient(800px 500px at 5% 105%, rgba(56,232,200,0.07), transparent 55%);
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- HERO ---------- */
+  header.hero { padding: 72px 0 48px; text-align: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    color: var(--accent-2); font-size: 13px; font-weight: 600;
+    padding: 7px 14px; border-radius: 999px; margin-bottom: 22px;
+    letter-spacing: .3px;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 12px var(--accent-2); }
+  h1 {
+    font-size: clamp(32px, 5vw, 56px); line-height: 1.08; font-weight: 800;
+    letter-spacing: -1px; margin-bottom: 18px;
+    background: linear-gradient(135deg, #fff 0%, #b9c6e8 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .hero p.sub { font-size: 19px; color: var(--muted); max-width: 680px; margin: 0 auto 14px; }
+  .hero .savings {
+    display: inline-flex; gap: 28px; margin-top: 30px; flex-wrap: wrap; justify-content: center;
+  }
+  .stat { text-align: center; }
+  .stat .num { font-size: 30px; font-weight: 800; color: var(--accent-2); }
+  .stat .lbl { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .stat .num .from { color: var(--danger); text-decoration: line-through; opacity: .65; font-weight: 600; margin-right: 6px; font-size: .8em; }
+
+  /* ---------- SECTIONS ---------- */
+  section { padding: 56px 0; }
+  .sec-head { text-align: center; margin-bottom: 44px; }
+  .sec-head .kicker { color: var(--accent); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; }
+  .sec-head h2 { font-size: clamp(26px, 3.5vw, 38px); font-weight: 800; letter-spacing: -.5px; margin-top: 8px; }
+  .sec-head p { color: var(--muted); max-width: 640px; margin: 10px auto 0; }
+
+  /* ---------- WORKFLOW FLOW ---------- */
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .flow-row { display: grid; grid-template-columns: 56px 1fr; gap: 18px; position: relative; padding-bottom: 8px; }
+  .flow-rail { display: flex; flex-direction: column; align-items: center; }
+  .flow-num {
+    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 16px; color: #fff;
+    background: linear-gradient(135deg, var(--accent), #2f5fd0);
+    box-shadow: 0 0 0 4px rgba(79,140,255,0.12);
+  }
+  .flow-line { width: 2px; flex: 1; background: linear-gradient(var(--border), transparent); min-height: 24px; margin-top: 4px; }
+  .flow-row:last-child .flow-line { display: none; }
+  .flow-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 22px; box-shadow: var(--shadow); margin-bottom: 18px;
+    transition: transform .18s ease, border-color .18s ease;
+  }
+  .flow-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .flow-card .title { font-weight: 700; font-size: 17px; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;}
+  .flow-card .title .tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+  .tag.sdk { background: rgba(79,140,255,.16); color: var(--accent); }
+  .tag.auto { background: rgba(56,232,160,.14); color: var(--good); }
+  .tag.tra { background: rgba(155,124,255,.16); color: var(--purple); }
+  .tag.act { background: rgba(255,176,32,.14); color: var(--warn); }
+  .flow-card .desc { color: var(--muted); font-size: 14.5px; }
+  .flow-card .file { display: inline-block; margin-top: 8px; font-family: "SF Mono", "Fira Code", Consolas, monospace; font-size: 12px; color: var(--accent-2); background: rgba(56,232,200,.07); padding: 3px 8px; border-radius: 6px; }
+
+  /* ---------- ARCHITECTURE ---------- */
+  .arch-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  .arch-layer {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    padding: 22px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .arch-layer::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+  .arch-layer.customer::before { background: var(--accent); }
+  .arch-layer.platform::before { background: var(--accent-2); }
+  .arch-layer.workers::before { background: var(--purple); }
+  .arch-layer.data::before { background: var(--warn); }
+  .arch-layer .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 14px; }
+  .arch-layer.customer .label { color: var(--accent); }
+  .arch-layer.platform .label { color: var(--accent-2); }
+  .arch-layer.workers .label { color: var(--purple); }
+  .arch-layer.data .label { color: var(--warn); }
+  .nodes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; font-size: 13.5px; font-weight: 600; flex: 1 1 auto; min-width: 150px;
+  }
+  .node small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .arrow-down { text-align: center; color: var(--muted); font-size: 22px; margin: -6px 0; opacity: .5; }
+
+  /* ---------- TRA ---------- */
+  .tra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .tra-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow); transition: transform .2s ease, border-color .2s ease; cursor: default;
+  }
+  .tra-card:hover { transform: translateY(-4px); border-color: var(--purple); }
+  .tra-card .icon { font-size: 26px; margin-bottom: 12px; }
+  .tra-card .tname { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
+  .tra-card .tdesc { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+  .tra-card .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px; }
+  .tra-card .badge.llm { background: rgba(155,124,255,.16); color: var(--purple); }
+  .tra-card .badge.stat { background: rgba(56,232,160,.14); color: var(--good); }
+
+  /* ---------- MAGIC LOOP ---------- */
+  .loop {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+    padding: 36px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .loop-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 8px; position: relative; }
+  .loop-step { text-align: center; padding: 16px 10px; border-radius: 12px; position: relative; }
+  .loop-step .ls-num {
+    width: 34px; height: 34px; border-radius: 50%; margin: 0 auto 10px;
+    display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; color: #fff;
+  }
+  .loop-step.s1 .ls-num { background: var(--danger); }
+  .loop-step.s2 .ls-num { background: var(--warn); }
+  .loop-step.s3 .ls-num { background: var(--purple); }
+  .loop-step.s4 .ls-num { background: var(--accent); }
+  .loop-step.s5 .ls-num { background: var(--good); }
+  .loop-step .ls-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .loop-step .ls-desc { font-size: 12px; color: var(--muted); }
+  .loop-step.s1 { background: rgba(255,92,124,.06); }
+  .loop-step.s2 { background: rgba(255,176,32,.06); }
+  .loop-step.s3 { background: rgba(155,124,255,.06); }
+  .loop-step.s4 { background: rgba(79,140,255,.06); }
+  .loop-step.s5 { background: rgba(56,232,160,.06); }
+  .loop-score {
+    display: flex; align-items: center; justify-content: center; gap: 24px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .score-box { text-align: center; }
+  .score-box .v { font-size: 44px; font-weight: 900; line-height: 1; }
+  .score-box .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  .score-box.bad .v { color: var(--danger); }
+  .score-box.good .v { color: var(--good); }
+  .score-arrow { font-size: 28px; color: var(--muted); }
+  .score-delta { font-size: 22px; font-weight: 800; color: var(--danger); }
+
+  /* ---------- RULES ---------- */
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 14px; }
+  .rule { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent-2); border-radius: 10px; padding: 16px 18px; }
+  .rule .rn { font-weight: 800; color: var(--accent-2); font-size: 13px; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px; }
+  .rule .rt { font-size: 14px; }
+  .rule .rt code { background: rgba(79,140,255,.12); color: var(--accent); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; font-family: "SF Mono", Consolas, monospace; }
+
+  footer { text-align: center; padding: 48px 0 64px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); margin-top: 40px; }
+
+  /* ---------- ANIMATIONS ---------- */
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  .live { animation: pulse 2s ease-in-out infinite; }
+  @media (max-width: 720px) {
+    .loop-steps { grid-template-columns: repeat(2, 1fr); }
+    .hero .savings { gap: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="pill"><span class="dot live"></span> FinetuneOps · Operation Map</span>
+    <h1>The debugger for fine-tuned LLMs</h1>
+    <p class="sub">FinetuneOps automatically finds which specific training examples caused a quality regression, explains why each one is problematic, and removes them in one click — producing a clean dataset ready for retraining.</p>
+    <div class="savings">
+      <div class="stat"><div class="num"><span class="from">4 days</span>11 min</div><div class="lbl">Time to root cause</div></div>
+      <div class="stat"><div class="num">87 → 63 → 82</div><div class="lbl">Accuracy: detect · recover</div></div>
+      <div class="stat"><div class="num">4</div><div class="lbl">TRA analysis techniques</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ CUSTOMER WORKFLOW ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">The Customer Journey</div>
+      <h2>From trace capture to clean dataset, in 9 steps</h2>
+      <p>The end-to-end flow a customer experiences. Steps 1–5 are setup &amp; observation; step 6 is the trigger; steps 7–9 are automated root-cause analysis and one-click recovery.</p>
+    </div>
+
+    <div class="flow">
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">1</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Install the trace capture SDK <span class="tag sdk">SDK</span></div>
+          <div class="desc">Wrap OpenAI / Anthropic / Fireworks / Together SDK calls. Every inference is batched and shipped to the platform.</div>
+          <span class="file">packages/sdk · wrap-openai.ts · wrap-anthropic.ts</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">2</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Upload the fine-tune dataset <span class="tag act">data</span></div>
+          <div class="desc">JSONL upload with automatic versioning. The quality gate runs immediately: duplicate detection, PII scanning, label balance, length &amp; cost checks.</div>
+          <span class="file">quality-engine.ts · Dataset + DatasetExample</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">3</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Submit a fine-tune job <span class="tag act">train</span></div>
+          <div class="desc">The platform launches the job with the customer's provider (OpenAI today; Fireworks + Together on roadmap). A poll worker tracks it to completion.</div>
+          <span class="file">runtime.ts · launch-finetune · poll-finetune</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">4</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Run evaluation — before &amp; after <span class="tag auto">eval</span></div>
+          <div class="desc">Auto-eval runs the baseline model and the candidate against a benchmark. Exact-match + Jaccard scoring, using the <em>customer's</em> API key (never the platform's).</div>
+          <span class="file">auto-eval-engine.ts · EvalRun (before + after)</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">5</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Compare scores <span class="tag auto">compare</span></div>
+          <div class="desc">The regression engine compares baseline vs candidate, metric by metric, respecting direction (higher-is-better or lower-is-better).</div>
+          <span class="file">regression-engine.ts · detectRegressionBetweenRuns</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">6</div><div class="flow-line"></div></div>
+        <div class="flow-card" style="border-color: var(--danger);">
+          <div class="title">⚠ Regression detected → alert fires <span class="tag" style="background:rgba(255,92,124,.16); color:var(--danger);">trigger</span></div>
+          <div class="desc">If the candidate score drops past the threshold, a <strong>RegressionAlert</strong> is auto-created and a Slack notification is sent. This is the buying trigger — the moment of pain.</div>
+          <span class="file">RegressionAlert · slack.ts</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">7</div><div class="flow-line"></div></div>
+        <div class="flow-card" style="border-color: var(--purple);">
+          <div class="title">TRA Engine runs 4 root-cause techniques <span class="tag tra">TRA</span></div>
+          <div class="desc">The Training Regression Autopilot analyses the dataset to find <em>which exact examples</em> caused the drop. Two use an LLM-judge (the customer's key), two are pure statistics.</div>
+          <span class="file">tra-engine.ts · TraReport + SuspiciousExample</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">8</div><div class="flow-line"></div></div>
+        <div class="flow-card">
+          <div class="title">Review ranked suspicious examples <span class="tag tra">explain</span></div>
+          <div class="desc">Each flagged example shows a confidence score, category, impact estimate, and a human-readable reason. No black box — every removal is justified.</div>
+          <span class="file">/regressions/[id] · TRA report UI</span>
+        </div>
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-rail"><div class="flow-num">9</div></div>
+        <div class="flow-card" style="border-color: var(--good);">
+          <div class="title">✓ One-Click Recovery → clean dataset <span class="tag" style="background:rgba(56,232,160,.14); color:var(--good);">recover</span></div>
+          <div class="desc">Bad examples (confidence &gt; 0.6) are removed and a new versioned dataset is created. The customer retrains on the clean data — closing the loop.</div>
+          <span class="file">recovery-engine.ts · recovery-worker.ts · RecoveryJob</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">System Architecture</div>
+      <h2>How data flows through FinetuneOps</h2>
+      <p>Four layers: the customer's app, the Next.js platform, the BullMQ worker fleet, and Postgres + Redis. Note the critical design rule — the platform holds <strong>no LLM key of its own</strong>.</p>
+    </div>
+
+    <div class="arch-grid">
+      <div class="arch-layer customer">
+        <div class="label">① Customer Application</div>
+        <div class="nodes">
+          <div class="node">Trace Capture SDK<small>wrap-openai / wrap-anthropic, batching</small></div>
+          <div class="node">Customer's Provider Keys<small>OpenAI · Anthropic · Fireworks · Together</small></div>
+        </div>
+      </div>
+      <div class="arrow-down">▼</div>
+
+      <div class="arch-layer platform">
+        <div class="label">② Next.js 14 Platform (App Router · Server Actions)</div>
+        <div class="nodes">
+          <div class="node">Ingest API<small>/api/traces/ingest/batch + rate limiting</small></div>
+          <div class="node">Regression Engine<small>baseline vs candidate comparison</small></div>
+          <div class="node">TRA Engine<small>4 root-cause techniques</small></div>
+          <div class="node">Recovery Engine<small>threshold-based example removal</small></div>
+          <div class="node">Auth + Billing<small>NextAuth · Stripe (atomic SQL)</small></div>
+        </div>
+      </div>
+      <div class="arrow-down">▼ enqueues jobs (pooled queues)</div>
+
+      <div class="arch-layer workers">
+        <div class="label">③ BullMQ Worker Fleet (Redis-backed)</div>
+        <div class="nodes">
+          <div class="node">tra-worker<small>runs TRA on a regression alert</small></div>
+          <div class="node">recovery-worker<small>builds clean dataset</small></div>
+          <div class="node">launch / poll-finetune<small>OpenAI job lifecycle</small></div>
+          <div class="node">safety-scan · score-dataset<small>quality gates</small></div>
+        </div>
+      </div>
+      <div class="arrow-down">▼</div>
+
+      <div class="arch-layer data">
+        <div class="label">④ Data Layer</div>
+        <div class="nodes">
+          <div class="node">PostgreSQL (Prisma)<small>Workspace → Dataset → EvalRun → RegressionAlert → TraReport</small></div>
+          <div class="node">Redis (Upstash)<small>queue + rate-limit state</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TRA ENGINE ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">TRA Engine — the core IP</div>
+      <h2>Four techniques that find the bad examples</h2>
+      <p>TRA combines LLM-as-judge (paid, needs the customer's key) with pure statistics (free, always runs). When no credential is present, it runs in <em>limited mode</em> — techniques 3 &amp; 4 only — and tells the user.</p>
+    </div>
+
+    <div class="tra-grid">
+      <div class="tra-card">
+        <div class="icon">⚔️</div>
+        <div class="tname">1 · Instruction Conflict</div>
+        <div class="tdesc">Finds examples where the input instruction contradicts the output label or response — e.g. the model is taught to refuse when asked for a safe answer.</div>
+        <span class="badge llm">LLM-judge · 8 per batch</span>
+      </div>
+      <div class="tra-card">
+        <div class="icon">🏷️</div>
+        <div class="tname">2 · Label Noise</div>
+        <div class="tdesc">Flags mislabeled examples — outputs that don't make sense for the input and would teach the fine-tune the wrong behavior.</div>
+        <span class="badge llm">LLM-judge · max 40 samples</span>
+      </div>
+      <div class="tra-card">
+        <div class="icon">📑</div>
+        <div class="tname">3 · Duplicate Conflict</div>
+        <div class="tdesc">Near-duplicate inputs with conflicting outputs. Jaccard similarity clusters rows that bias the model toward one canonical answer.</div>
+        <span class="badge stat">Statistical · no LLM</span>
+      </div>
+      <div class="tra-card">
+        <div class="icon">⚖️</div>
+        <div class="tname">4 · Class Imbalance</div>
+        <div class="tdesc">Detects label distributions skewed enough to overfit the model toward one class, undermining minority-case accuracy.</div>
+        <span class="badge stat">Statistical · no LLM</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MAGIC LOOP ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">The Magic Moment</div>
+      <h2>Detect → Explain → Recover → Verify</h2>
+      <p>This is the loop that turns 4 engineer-days into 11 minutes, and turns a painful regression into a proof point. This exact scenario is now seeded in the demo workspace.</p>
+    </div>
+
+    <div class="loop">
+      <div class="loop-score">
+        <div class="score-box good"><div class="v">87.2</div><div class="l">Baseline</div></div>
+        <div class="score-arrow">▶</div>
+        <div class="score-box bad"><div class="v">63.4</div><div class="l">After fine-tune</div></div>
+        <div class="score-delta">−23.8</div>
+        <div class="score-arrow">⟳ recover</div>
+        <div class="score-box good"><div class="v">~82.5</div><div class="l">After recovery + retrain</div></div>
+      </div>
+
+      <div class="loop-steps">
+        <div class="loop-step s1">
+          <div class="ls-num">1</div>
+          <div class="ls-title">Regression Alert</div>
+          <div class="ls-desc">Score drops past threshold. Alert + Slack fire.</div>
+        </div>
+        <div class="loop-step s2">
+          <div class="ls-num">2</div>
+          <div class="ls-title">TRA Analysis</div>
+          <div class="ls-desc">4 techniques scan the training dataset.</div>
+        </div>
+        <div class="loop-step s3">
+          <div class="ls-num">3</div>
+          <div class="ls-title">Ranked Causes</div>
+          <div class="ls-desc">Suspicious examples with confidence + reasons.</div>
+        </div>
+        <div class="loop-step s4">
+          <div class="ls-num">4</div>
+          <div class="ls-title">One-Click Recovery</div>
+          <div class="ls-desc">Bad rows removed (conf &gt; 0.6). New dataset version.</div>
+        </div>
+        <div class="loop-step s5">
+          <div class="ls-num">5</div>
+          <div class="ls-title">Retrain &amp; Verify</div>
+          <div class="ls-desc">Clean data → retrain → score restored.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE RULES ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Architecture Rules — never violate</div>
+      <h2>The load-bearing constraints</h2>
+      <p>These six rules keep the system correct under load and protect revenue &amp; security.</p>
+    </div>
+    <div class="rules">
+      <div class="rule"><div class="rn">Rule 1 · Queue Pooling</div><div class="rt">BullMQ <code>Queue</code> instances are cached in a module-level Map. Never instantiate <code>new Queue()</code> in a handler — it exhausts Redis connections.</div></div>
+      <div class="rule"><div class="rn">Rule 2 · No Platform LLM Key</div><div class="rt">TRA uses the <em>customer's</em> credential via <code>getActiveCredential()</code>. Never <code>process.env.OPENAI_API_KEY</code>. No key → statistical-only (limited mode).</div></div>
+      <div class="rule"><div class="rn">Rule 3 · Atomic Billing</div><div class="rt"><code>tracesUsed</code> increments use raw SQL with <code>GREATEST()</code>. Never in-memory — the race loses revenue.</div></div>
+      <div class="rule"><div class="rn">Rule 4 · Separate Jaccard</div><div class="rt">quality-engine and tra-engine each keep their own Jaccard implementation. The separation is intentional — don't unify.</div></div>
+      <div class="rule"><div class="rn">Rule 5 · Dual Worker Registration</div><div class="rt">Every worker is registered in <b>both</b> <code>runtime.ts</code> <b>and</b> <code>index.ts</code>, or it never processes jobs.</div></div>
+      <div class="rule"><div class="rn">Rule 6 · Workspace Auth</div><div class="rt">All pages use <code>getServerSession()</code> filtered by workspaceId. Never expose data across tenant boundaries.</div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    FinetuneOps · Next.js 14 · TypeScript · Prisma + Postgres · BullMQ + Redis · Stripe · NextAuth<br/>
+    The debugger for fine-tuned LLMs — finds the training example that caused the regression.
+  </div>
+</footer>
+
+</body>
+</html>

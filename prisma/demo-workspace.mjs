@@ -260,6 +260,18 @@ export function buildDemoWorkspaceSeed({
         startedAt: new Date("2026-04-18T08:30:00.000Z"),
         finishedAt: new Date("2026-04-18T11:10:00.000Z"),
       },
+      {
+        name: "Billing specialist v3 (regressed)",
+        modelBase: "gpt-4o-mini",
+        provider: "OpenAI",
+        status: "completed",
+        progress: 100,
+        gpuType: "Managed fine-tune",
+        gpuHours: 3.8,
+        checkpoint: "checkpoint-epoch-3",
+        startedAt: new Date("2026-06-10T09:00:00.000Z"),
+        finishedAt: new Date("2026-06-10T11:30:00.000Z"),
+      },
     ],
     backgroundJobs: [
       {
@@ -321,6 +333,71 @@ export function buildDemoWorkspaceSeed({
         judge: "LLM judge + spot checks",
       },
     ],
+    regression: {
+      baseline: {
+        name: "Billing accuracy - baseline (gpt-4o-mini)",
+        benchmark: "billing_accuracy",
+        status: "passing",
+        score: 87.2,
+        judge: "Exact-match + policy rubric",
+        modelId: "gpt-4o-mini",
+        runAt: new Date("2026-06-09T17:00:00.000Z"),
+      },
+      candidate: {
+        name: "Billing accuracy - candidate (Billing specialist v3)",
+        benchmark: "billing_accuracy",
+        status: "failing",
+        score: 63.4,
+        delta: -23.8,
+        judge: "Exact-match + policy rubric",
+        modelId: "ft:gpt-4o-mini:billing-specialist-v3",
+        runAt: new Date("2026-06-10T15:00:00.000Z"),
+      },
+      alert: {
+        metric: "billing_accuracy",
+        baselineScore: 87.2,
+        candidateScore: 63.4,
+        delta: -23.8,
+        severity: "critical",
+        status: "open",
+        createdAt: new Date("2026-06-10T15:12:00.000Z"),
+      },
+      traReport: {
+        confidence: 0.91,
+        rootCauseCategory: "instruction_conflict",
+        summary:
+          "The billing specialist v3 fine-tune regressed because the training dataset (Support Failures Raw Backlog, v12) contained a near-duplicate pair with conflicting output labels, a refund/cancellation instruction conflict, and a PII-leaking example that taught the model to echo customer email addresses. These three examples account for an estimated 19 of the 23.8-point drop.",
+        recommendedAction:
+          "Remove the flagged conflicting duplicate, the refund/cancellation instruction conflict, and the PII example, then retrain on the cleaned dataset. Estimated recovery: 19.1 points, restoring accuracy to ~82.5.",
+        estimatedRecovery: 19.1,
+        suspiciousExamples: [
+          {
+            exampleIndex: 0,
+            confidence: 0.94,
+            reason:
+              "Near-duplicate inputs ('Refund policy says refunds land in 5 business days.') with identical output labels. The duplicate inflates this single phrasing and crowds out diverse refund scenarios, biasing the model toward one canonical answer.",
+            category: "duplicate_conflict",
+            impactScore: 0.71,
+          },
+          {
+            exampleIndex: 4,
+            confidence: 0.9,
+            reason:
+              "Instruction conflict: the input describes a cancellation policy that requires manager approval, but the output answers about late refund exceptions. The model is taught to confuse cancellation and refund workflows.",
+            category: "instruction_conflict",
+            impactScore: 0.83,
+          },
+          {
+            exampleIndex: 2,
+            confidence: 0.81,
+            reason:
+              "Label noise / PII leak: the input shares a customer email (buyer@example.com) and the output tells the model to repeat it. This teaches the assistant to surface raw PII in responses, which fails the billing accuracy rubric.",
+            category: "label_noise",
+            impactScore: 0.66,
+          },
+        ],
+      },
+    },
     pendingRelease: {
       name: "Support Specialist v2.4",
       channel: "Staging",

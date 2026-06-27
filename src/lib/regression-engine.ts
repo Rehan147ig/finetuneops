@@ -192,6 +192,7 @@ export async function autoDetectRegressionAfterEval(input: {
       where: {
         projectId: input.projectId,
         status: "completed",
+        benchmark: candidate.benchmark,
         id: {
           not: input.evalRunId,
         },
@@ -208,10 +209,19 @@ export async function autoDetectRegressionAfterEval(input: {
       return [];
     }
 
+    const project = await prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { regressionThresholds: true },
+    });
+
+    const projectThresholds = project?.regressionThresholds
+      ? (project.regressionThresholds as unknown as RegressionThreshold[])
+      : undefined;
+
     const regressions = detectRegressionBetweenRuns(
       baseline,
       candidate,
-      input.thresholds ?? DEFAULT_REGRESSION_THRESHOLDS,
+      input.thresholds ?? projectThresholds ?? DEFAULT_REGRESSION_THRESHOLDS,
     );
 
     if (regressions.length === 0) {

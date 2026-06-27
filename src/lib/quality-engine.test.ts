@@ -157,14 +157,13 @@ describe("quality engine", () => {
       },
       pii: {
         detected: 3,
-        categories: { email: 0, phone: 0, ssn: 0, credit_card: 0 },
+        categories: { email: 0, phone: 0, ssn: 0, credit_card: 0, person: 0, organization: 0, place: 0 },
         flagged: [],
       },
-      projectedSaving: 1.43,
     });
 
     expect(recommendation).toContain("43 exact duplicates");
-    expect(recommendation).toContain("$1.43");
+    expect(recommendation).toContain("3 PII traces");
   });
 
   it("builds a full dataset report", () => {

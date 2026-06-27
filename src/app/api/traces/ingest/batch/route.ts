@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { authenticateWorkspaceApiKey } from "@/lib/api-keys";
 import { withApiErrorHandling } from "@/lib/api-handler";
-import { enqueueBackgroundJob } from "@/lib/background-jobs";
+import { enqueueBackgroundJob, enqueueBackgroundJobsBatch } from "@/lib/background-jobs";
 import { enforceTraceLimit, incrementTraceUsage } from "@/lib/billing-data";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
@@ -100,70 +100,89 @@ export const POST = withApiErrorHandling("trace_batch_ingest_failed", async (req
   const errors: Array<{ index: number; error: string }> = [];
   const defaultUserId = await getDefaultUserId(project.id);
 
+  const usageDecision = await enforceTraceLimit(organizationId);
+
+  if (!usageDecision.allowed) {
+    return NextResponse.json(
+      {
+        error: usageDecision.reason ?? "Trace ingestion is not allowed for this workspace.",
+      },
+      { status: 403, headers: rateLimitHeaders(rl) },
+    );
+  }
+
+  const validTraces: Array<{ index: number; data: any }> = [];
+
   for (const [index, candidate] of payload.traces.entries()) {
     const validation = validateTraceIngestPayload(candidate);
 
     if (!validation.ok) {
       errors.push({ index, error: validation.error });
-      continue;
+    } else {
+      validTraces.push({ index, data: validation.data });
     }
+  }
 
-    const usageDecision = await enforceTraceLimit(organizationId);
+  if (validTraces.length === 0) {
+    return NextResponse.json(
+      { accepted: 0, rejected: errors.length, errors },
+      { status: 200, headers: rateLimitHeaders(rl) },
+    );
+  }
 
-    if (!usageDecision.allowed) {
-      errors.push({
-        index,
-        error: usageDecision.reason ?? "Trace ingestion is not allowed for this workspace.",
+  const createdTraces = await prisma.$transaction(
+    validTraces.map((t) => {
+      const severity = t.data.latency_ms > 2500 ? "high" : "medium";
+      return prisma.traceEvent.create({
+        data: {
+          projectId: project.id,
+          title: summarizeTraceTitle(t.data.input),
+          source: `${t.data.model} trace ingest`,
+          inputText: t.data.input,
+          outputText: t.data.output,
+          modelName: t.data.model,
+          latencyMs: t.data.latency_ms,
+          metadata: JSON.stringify(t.data.metadata),
+          tags: JSON.stringify(t.data.tags),
+          status: "triaged",
+          severity,
+          spanCount: Math.max(t.data.tags.length, 1),
+          opportunityScore: traceOpportunityFromSeverity(severity),
+        },
       });
-      continue;
-    }
+    })
+  );
 
-    const severity = validation.data.latency_ms > 2500 ? "high" : "medium";
-    const trace = await prisma.traceEvent.create({
-      data: {
-        projectId: project.id,
-        title: summarizeTraceTitle(validation.data.input),
-        source: `${validation.data.model} trace ingest`,
-        inputText: validation.data.input,
-        outputText: validation.data.output,
-        modelName: validation.data.model,
-        latencyMs: validation.data.latency_ms,
-        metadata: JSON.stringify(validation.data.metadata),
-        tags: JSON.stringify(validation.data.tags),
-        status: "triaged",
-        severity,
-        spanCount: Math.max(validation.data.tags.length, 1),
-        opportunityScore: traceOpportunityFromSeverity(severity),
-      },
-    });
-
-    await recordActivityEvent({
+  await prisma.activityLog.createMany({
+    data: validTraces.map((t, i) => ({
       projectId: project.id,
       type: "trace_captured",
-      message: `${trace.title} was ingested from ${validation.data.model}`,
+      message: `${createdTraces[i].title} was ingested from ${t.data.model}`,
       userId: defaultUserId,
-      metadata: {
-        traceId: trace.id,
-        model: validation.data.model,
-        latency_ms: validation.data.latency_ms,
-        tagCount: validation.data.tags.length,
-      },
-    });
+      metadata: JSON.stringify({
+        traceId: createdTraces[i].id,
+        model: t.data.model,
+        latency_ms: t.data.latency_ms,
+        tagCount: t.data.tags.length,
+      }),
+    })),
+  });
 
-    await enqueueBackgroundJob({
+  await enqueueBackgroundJobsBatch(
+    validTraces.map((t, i) => ({
       organizationId,
       projectId: project.id,
       jobType: "ingest-trace",
       payload: {
-        traceId: trace.id,
-        model: validation.data.model,
+        traceId: createdTraces[i].id,
+        model: t.data.model,
       },
       estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 2),
-    });
+    }))
+  );
 
-    await incrementTraceUsage(organizationId);
-    accepted += 1;
-  }
+  await incrementTraceUsage(organizationId, validTraces.length);
+  accepted = validTraces.length;
 
   return NextResponse.json(
     {

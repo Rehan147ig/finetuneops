@@ -125,11 +125,6 @@ export default async function DatasetDetailPage({ params }: PageProps) {
                   <h3>{formatCurrency(report.estimatedCost)}</h3>
                   <p className="muted">Training cost with the current dataset</p>
                 </article>
-                <article className="panel mini-card">
-                  <p className="eyebrow">Projected saving</p>
-                  <h3>{formatCurrency(report.projectedSaving)}</h3>
-                  <p className="muted">Potential saving after removing flagged examples</p>
-                </article>
               </div>
             </SectionCard>
           </div>

@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { getServerEnv } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 export type TraCategory =
@@ -39,8 +38,16 @@ export type TraAnalysisResult = {
   rootCauseCategory: TraCategory | "unknown";
   summary: string;
   recommendedAction: string;
-  estimatedRecovery: number;
+  /** Qualitative impact rating replacing the previous fake estimatedRecovery percentage. */
+  impactRating: "LOW" | "MEDIUM" | "HIGH";
   suspiciousExamples: TraSuspiciousExample[];
+  limitedMode: boolean;
+  /** How many examples were in the dataset. */
+  totalExamples: number;
+  /** How many examples were sampled for label-noise detection. */
+  labelNoiseSampleSize: number;
+  /** Whether the duplicate scan was limited to a sample due to dataset size. */
+  duplicateScanSampled: boolean;
 };
 
 type OpenAiLike = {
@@ -63,8 +70,11 @@ type OpenAiLike = {
 };
 
 const BATCH_SIZE = 8;
-const LABEL_NOISE_SAMPLE_SIZE = 40;
+/** Increased from 40 → 200 for better coverage on large datasets. */
+const LABEL_NOISE_SAMPLE_SIZE = 200;
 const MAX_SUSPICIOUS_EXAMPLES = 10;
+/** Datasets larger than this are sampled for O(n²) duplicate detection. */
+const DUPLICATE_SCAN_CAP = 3_000;
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
@@ -110,15 +120,18 @@ function chunk<T>(items: T[], size: number) {
   return chunks;
 }
 
-function createOpenAiClient(): OpenAiLike | null {
-  const apiKey = getServerEnv().OPENAI_API_KEY;
-
-  if (!apiKey) {
+// RULE 2: TRA must NEVER read the platform's OPENAI_API_KEY.
+// The LLM judge uses the customer's own provider credential, which the worker
+// looks up via getActiveCredential() and passes in here. When no credential is
+// supplied, TRA runs statistical-only (duplicate + class-imbalance) and reports
+// limitedMode so the UI can tell the user why two techniques were skipped.
+function createOpenAiClient(customerApiKey?: string): OpenAiLike | null {
+  if (!customerApiKey) {
     return null;
   }
 
   return new OpenAI({
-    apiKey,
+    apiKey: customerApiKey,
     timeout: 15_000,
   }) as OpenAiLike;
 }
@@ -292,18 +305,52 @@ export async function labelNoiseDetection(
   });
 }
 
-export function duplicateConflictFinder(examples: TraDatasetExample[]): TraSuspiciousExample[] {
+export function duplicateConflictFinder(examples: TraDatasetExample[]): {
+  suspicious: TraSuspiciousExample[];
+  sampled: boolean;
+} {
   const suspicious: TraSuspiciousExample[] = [];
 
-  for (let leftIndex = 0; leftIndex < examples.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < examples.length; rightIndex += 1) {
-      const left = examples[leftIndex];
-      const right = examples[rightIndex];
-      const similarity = jaccardSimilarity(left.inputText, right.inputText);
-      const leftOutput = normalizedOutput(left.outputText);
-      const rightOutput = normalizedOutput(right.outputText);
+  // Cap O(n²) scan at DUPLICATE_SCAN_CAP rows to prevent OOM on large datasets.
+  const sampled = examples.length > DUPLICATE_SCAN_CAP;
+  const scanSet = sampled
+    ? examples.slice(0, DUPLICATE_SCAN_CAP)
+    : examples;
 
-      if (similarity < 0.72 || !leftOutput || !rightOutput || leftOutput === rightOutput) {
+  const processed = scanSet.map(ex => ({
+    id: ex.id,
+    inputText: ex.inputText,
+    tokens: new Set(normalizeTokens(ex.inputText)),
+    output: normalizedOutput(ex.outputText),
+  }));
+
+  for (let leftIndex = 0; leftIndex < processed.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < processed.length; rightIndex += 1) {
+      const left = processed[leftIndex];
+      const right = processed[rightIndex];
+
+      if (!left.output || !right.output || left.output === right.output) {
+        continue;
+      }
+
+      const minSize = Math.min(left.tokens.size, right.tokens.size);
+      const maxSize = Math.max(left.tokens.size, right.tokens.size);
+
+      if (maxSize > 0 && (minSize / maxSize) < 0.72) {
+        continue;
+      }
+
+      let intersectionSize = 0;
+      const smallestSet = left.tokens.size < right.tokens.size ? left.tokens : right.tokens;
+      const largestSet = left.tokens.size < right.tokens.size ? right.tokens : left.tokens;
+      for (const token of smallestSet) {
+        if (largestSet.has(token)) intersectionSize++;
+      }
+
+      const unionSize = left.tokens.size + right.tokens.size - intersectionSize;
+      const similarity = unionSize === 0 ? 0 : intersectionSize / unionSize;
+
+      if (similarity < 0.72) {
         continue;
       }
 
@@ -318,7 +365,7 @@ export function duplicateConflictFinder(examples: TraDatasetExample[]): TraSuspi
         category: "duplicate_conflict",
         impactScore: clamp01(confidence + 0.05),
         inputPreview: preview(left.inputText),
-        outputPreview: preview(left.outputText),
+        outputPreview: preview(examples[leftIndex].outputText),
       });
       suspicious.push({
         exampleId: right.id,
@@ -328,12 +375,12 @@ export function duplicateConflictFinder(examples: TraDatasetExample[]): TraSuspi
         category: "duplicate_conflict",
         impactScore: clamp01(confidence + 0.05),
         inputPreview: preview(right.inputText),
-        outputPreview: preview(right.outputText),
+        outputPreview: preview(examples[rightIndex].outputText),
       });
     }
   }
 
-  return suspicious;
+  return { suspicious, sampled };
 }
 
 export function classImbalanceDetection(input: {
@@ -420,13 +467,13 @@ export function rankAndDeduplicateSuspiciousExamples(
 function summarizeRootCause(suspiciousExamples: TraSuspiciousExample[]): {
   category: TraCategory | "unknown";
   confidence: number;
-  estimatedRecovery: number;
+  impactRating: "LOW" | "MEDIUM" | "HIGH";
 } {
   if (suspiciousExamples.length === 0) {
     return {
       category: "unknown",
       confidence: 0,
-      estimatedRecovery: 0,
+      impactRating: "LOW",
     };
   }
 
@@ -439,15 +486,19 @@ function summarizeRootCause(suspiciousExamples: TraSuspiciousExample[]): {
     [...categoryScores.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "unknown";
   const topThree = suspiciousExamples.slice(0, 3);
   const confidence = topThree.reduce((sum, example) => sum + example.confidence, 0) / topThree.length;
-  const estimatedRecovery = Math.min(
-    0.4,
-    suspiciousExamples.reduce((sum, example) => sum + example.impactScore, 0) / 20,
-  );
+
+  // Qualitative rating: based on count of high-confidence suspicious examples.
+  // This replaces the previous fake formula min(0.4, sum/20) which had no empirical basis.
+  const highConfidenceCount = suspiciousExamples.filter(e => e.confidence >= 0.75).length;
+  const impactRating: "LOW" | "MEDIUM" | "HIGH" =
+    highConfidenceCount >= 4 ? "HIGH" :
+    highConfidenceCount >= 2 ? "MEDIUM" :
+    "LOW";
 
   return {
     category,
     confidence: Number(confidence.toFixed(3)),
-    estimatedRecovery: Number(estimatedRecovery.toFixed(3)),
+    impactRating,
   };
 }
 
@@ -460,13 +511,19 @@ function categoryLabel(category: TraCategory | "unknown") {
 
 export async function runTraAnalysis(
   input: TraAnalysisInput,
-  client: OpenAiLike | null = createOpenAiClient(),
+  customerApiKey?: string | null,
 ): Promise<TraAnalysisResult> {
+  const client = createOpenAiClient(customerApiKey ?? undefined);
+  const limitedMode = !client;
+  const totalExamples = input.examples.length;
+  const labelNoiseSampleSize = Math.min(LABEL_NOISE_SAMPLE_SIZE, totalExamples);
+
   const [instructionConflicts, labelNoise] = await Promise.all([
     instructionConflictDetection(input.examples, client),
     labelNoiseDetection(input.examples, client),
   ]);
-  const duplicateConflicts = duplicateConflictFinder(input.examples);
+  const { suspicious: duplicateConflicts, sampled: duplicateScanSampled } =
+    duplicateConflictFinder(input.examples);
   const classImbalance = classImbalanceDetection({
     examples: input.examples,
     regressionMetric: input.regressionMetric,
@@ -485,18 +542,30 @@ export async function runTraAnalysis(
       rootCauseCategory: "unknown",
       summary: `TRA did not find a likely data root cause for ${input.regressionMetric}.`,
       recommendedAction: "Review eval cases manually and run TRA again after adding more labeled examples.",
-      estimatedRecovery: 0,
+      impactRating: "LOW",
       suspiciousExamples: [],
+      limitedMode,
+      totalExamples,
+      labelNoiseSampleSize,
+      duplicateScanSampled,
     };
   }
 
   return {
     confidence: rootCause.confidence,
     rootCauseCategory: rootCause.category,
-    summary: `${categoryLabel(rootCause.category)} is the most likely cause of the ${input.regressionMetric} regression from ${input.baselineScore} to ${input.candidateScore}.`,
+    summary: `${
+      limitedMode ? "[Limited Mode] " : ""
+    }${categoryLabel(rootCause.category)} is the most likely cause of the ${
+      input.regressionMetric
+    } regression from ${input.baselineScore} to ${input.candidateScore}.`,
     recommendedAction:
       "Review the top suspicious examples, remove or relabel confirmed bad rows, then create a cleaned dataset version before retraining.",
-    estimatedRecovery: rootCause.estimatedRecovery,
+    impactRating: rootCause.impactRating,
     suspiciousExamples,
+    limitedMode,
+    totalExamples,
+    labelNoiseSampleSize,
+    duplicateScanSampled,
   };
 }

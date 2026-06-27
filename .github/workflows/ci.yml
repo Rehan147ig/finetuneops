@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-progress runs on the same ref when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Single job that runs the full quality gate sequentially. Splitting into
+  # parallel jobs would add complexity without much speedup here since the test
+  # suite is fast (~25s) and most steps share the same install + generate setup.
+  build-test:
+    name: Lint · Type-check · Test · Build
+    runs-on: ubuntu-latest
+
+    env:
+      # Build-time fallbacks so next build / prisma generate / tests can run
+      # without real secrets. env.ts supplies these in the build phase anyway,
+      # but CI gets them explicitly to avoid any ambiguity.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/finetuneops?schema=public
+      NEXTAUTH_SECRET: ci-nextauth-secret
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      GOOGLE_CLIENT_ID: ci-google-id
+      GOOGLE_CLIENT_SECRET: ci-google-secret
+      GITHUB_CLIENT_ID: ci-github-id
+      GITHUB_CLIENT_SECRET: ci-github-secret
+      STRIPE_SECRET_KEY: sk_test_ci_placeholder
+      STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
+      STRIPE_WEBHOOK_SECRET: whsec_ci_placeholder
+      RESEND_API_KEY: re_ci_placeholder
+      RESEND_FROM_EMAIL: "FinetuneOps <ci@example.com>"
+      REDIS_URL: redis://127.0.0.1:6379
+      ENCRYPTION_KEY: "12345678901234567890123456789012"
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      APP_URL: http://127.0.0.1:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The generated Prisma client is not committed. Tests and the build both
+      # import @prisma/client, so generate it right after install.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      # next build is the authoritative type-check for this project — it runs a
+      # full TypeScript pass during compilation (test files are excluded from the
+      # Next build graph, which is why a standalone `tsc --noEmit` is not used:
+      # it would surface test-file noise that the production build correctly
+      # ignores).
+      - name: Production build
+        run: npm run build
+
+  # Lightweight job that confirms the worker process at least compiles and
+  # starts type-checking, since it is a separate entrypoint from the Next app.
+  worker-check:
+    name: Worker entrypoint type-check
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/finetuneops?schema=public
+      NEXTAUTH_SECRET: ci-nextauth-secret
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      GOOGLE_CLIENT_ID: ci-google-id
+      GOOGLE_CLIENT_SECRET: ci-google-secret
+      GITHUB_CLIENT_ID: ci-github-id
+      GITHUB_CLIENT_SECRET: ci-github-secret
+      STRIPE_SECRET_KEY: sk_test_ci_placeholder
+      STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
+      STRIPE_WEBHOOK_SECRET: whsec_ci_placeholder
+      RESEND_API_KEY: re_ci_placeholder
+      RESEND_FROM_EMAIL: "FinetuneOps <ci@example.com>"
+      REDIS_URL: redis://127.0.0.1:6379
+      ENCRYPTION_KEY: "12345678901234567890123456789012"
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      APP_URL: http://127.0.0.1:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Confirm the standalone worker entrypoint type-checks. We exclude test
+      # files to avoid test-only type noise (the worker ships no test code).
+      - name: Type-check worker entrypoint
+        run: npx tsc --noEmit --skipLibCheck src/workers/index.ts src/workers/runtime.ts src/workers/recovery-worker.ts src/workers/tra-worker.ts

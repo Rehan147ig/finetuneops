@@ -48,23 +48,32 @@ function resolveQueueName(queueNameOrJobType: string) {
   return queueNameOrJobType;
 }
 
+const queueCache = new Map<string, Queue>();
+
 export function getBackgroundJobQueue(
   queueNameOrJobType: BackgroundJobType | string = "finetuneops-background-jobs",
 ) {
   const queueName = resolveQueueName(queueNameOrJobType);
 
-  return new Queue(queueName, {
-    connection: getRedisConnection(),
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: "exponential",
-        delay: 1000,
-      },
-      removeOnComplete: 250,
-      removeOnFail: 250,
-    },
-  });
+  if (!queueCache.has(queueName)) {
+    queueCache.set(
+      queueName,
+      new Queue(queueName, {
+        connection: getRedisConnection(),
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: "exponential",
+            delay: 1000,
+          },
+          removeOnComplete: 250,
+          removeOnFail: 250,
+        },
+      })
+    );
+  }
+
+  return queueCache.get(queueName)!;
 }
 
 export async function enqueueBackgroundJob(input: {
@@ -99,9 +108,55 @@ export async function enqueueBackgroundJob(input: {
     projectId: input.projectId ?? null,
     payload: input.payload ?? {},
   }, input.delayMs ? { delay: input.delayMs } : undefined);
-  await queue.close();
 
   return backgroundJob;
+}
+
+export async function enqueueBackgroundJobsBatch(inputs: Array<{
+  organizationId: string;
+  projectId?: string | null;
+  jobType: BackgroundJobType;
+  payload?: Record<string, unknown>;
+  estimatedCompletionAt?: Date | null;
+  delayMs?: number;
+}>) {
+  if (inputs.length === 0) return [];
+
+  const queueName = getQueueNameForJobType(inputs[0]!.jobType);
+  const queue = getBackgroundJobQueue(queueName);
+  
+  const backgroundJobs = await prisma.$transaction(
+    inputs.map(input => prisma.backgroundJob.create({
+      data: {
+        organizationId: input.organizationId,
+        projectId: input.projectId ?? null,
+        queueName,
+        jobType: input.jobType,
+        status: "queued",
+        progress: 0,
+        attempts: 0,
+        maxAttempts: 3,
+        estimatedCompletionAt: input.estimatedCompletionAt ?? null,
+        payload: JSON.stringify(input.payload ?? {}),
+        logs: JSON.stringify([`Queued ${input.jobType}`]),
+      }
+    }))
+  );
+
+  await queue.addBulk(
+    backgroundJobs.map((job, index) => ({
+      name: inputs[index]!.jobType,
+      data: {
+        backgroundJobId: job.id,
+        organizationId: job.organizationId,
+        projectId: job.projectId,
+        payload: inputs[index]!.payload ?? {},
+      },
+      opts: inputs[index]!.delayMs ? { delay: inputs[index]!.delayMs } : undefined
+    }))
+  );
+
+  return backgroundJobs;
 }
 
 export async function updateBackgroundJobProgress(input: {
@@ -231,7 +286,6 @@ export async function retryBackgroundJob(backgroundJobId: string) {
     projectId: job.projectId,
     payload: parseJobPayload(job.payload),
   });
-  await queue.close();
 }
 
 async function runIngestTraceJob(backgroundJobId: string) {
@@ -332,7 +386,7 @@ async function runScoreDatasetJob(backgroundJobId: string, payload: Record<strin
       details: report.details,
       recommendation: report.recommendation,
       estimatedCost: report.estimatedCost,
-      projectedSaving: report.projectedSaving,
+      duplicateScanSampled: report.duplicateScanSampled,
     },
     create: {
       datasetId,
@@ -350,7 +404,7 @@ async function runScoreDatasetJob(backgroundJobId: string, payload: Record<strin
       details: report.details,
       recommendation: report.recommendation,
       estimatedCost: report.estimatedCost,
-      projectedSaving: report.projectedSaving,
+      duplicateScanSampled: report.duplicateScanSampled,
     },
   });
   await prisma.dataset.update({
@@ -443,173 +497,7 @@ async function runExperimentJob(backgroundJobId: string, payload: Record<string,
   });
 }
 
-async function runTraAnalysisJob(backgroundJobId: string, payload: Record<string, unknown>) {
-  const regressionAlertId = typeof payload.regressionAlertId === "string" ? payload.regressionAlertId : null;
 
-  if (!regressionAlertId) {
-    return failBackgroundJob({
-      backgroundJobId,
-      message: "TRA analysis could not start because regressionAlertId is missing.",
-    });
-  }
-
-  await updateBackgroundJobProgress({
-    backgroundJobId,
-    progress: 45,
-    status: "running",
-    message: "Running Training Regression Autopilot analysis.",
-    estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 3),
-  });
-
-  const alert = await prisma.regressionAlert.findUnique({
-    where: {
-      id: regressionAlertId,
-    },
-    include: {
-      candidateRun: {
-        include: {
-          dataset: {
-            include: {
-              examples: {
-                orderBy: {
-                  createdAt: "asc",
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!alert || !alert.candidateRun.dataset || alert.candidateRun.dataset.examples.length === 0) {
-    return failBackgroundJob({
-      backgroundJobId,
-      message: "TRA analysis failed because candidate dataset examples were unavailable.",
-    });
-  }
-
-  const analysis = await runTraAnalysis({
-    regressionMetric: alert.metric,
-    baselineScore: alert.baselineScore,
-    candidateScore: alert.candidateScore,
-    delta: alert.delta,
-    examples: alert.candidateRun.dataset.examples.map((example) => ({
-      id: example.id,
-      inputText: example.inputText,
-      outputText: example.outputText,
-      metadata: example.metadata,
-    })),
-  });
-
-  const report = await prisma.traReport.upsert({
-    where: {
-      regressionAlertId,
-    },
-    update: {
-      confidence: analysis.confidence,
-      rootCauseCategory: analysis.rootCauseCategory,
-      summary: analysis.summary,
-      recommendedAction: analysis.recommendedAction,
-      estimatedRecovery: analysis.estimatedRecovery,
-    },
-    create: {
-      regressionAlertId,
-      confidence: analysis.confidence,
-      rootCauseCategory: analysis.rootCauseCategory,
-      summary: analysis.summary,
-      recommendedAction: analysis.recommendedAction,
-      estimatedRecovery: analysis.estimatedRecovery,
-    },
-  });
-
-  await prisma.suspiciousExample.deleteMany({
-    where: {
-      traReportId: report.id,
-    },
-  });
-
-  if (analysis.suspiciousExamples.length > 0) {
-    await prisma.suspiciousExample.createMany({
-      data: analysis.suspiciousExamples.map((example) => ({
-        traReportId: report.id,
-        exampleId: example.exampleId,
-        exampleIndex: example.exampleIndex,
-        confidence: example.confidence,
-        reason: example.reason,
-        category: example.category,
-        impactScore: example.impactScore,
-        inputPreview: example.inputPreview ?? null,
-        outputPreview: example.outputPreview ?? null,
-      })),
-    });
-  }
-
-  return completeBackgroundJob({
-    backgroundJobId,
-    message: "TRA analysis completed and suspicious examples are ready.",
-    result: {
-      regressionAlertId,
-      traReportId: report.id,
-      suspiciousExamples: analysis.suspiciousExamples.length,
-    },
-  });
-}
-
-async function runLaunchFineTuneJob(backgroundJobId: string, payload: Record<string, unknown>) {
-  const trainingJobId = typeof payload.trainingJobId === "string" ? payload.trainingJobId : null;
-
-  if (!trainingJobId) {
-    return failBackgroundJob({
-      backgroundJobId,
-      message: "Fine-tune launch failed because trainingJobId is missing.",
-    });
-  }
-
-  await updateBackgroundJobProgress({
-    backgroundJobId,
-    progress: 35,
-    status: "running",
-    message: "Provisioning provider resources and restoring checkpoints if needed.",
-    estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 8),
-  });
-
-  const trainingJob = await prisma.trainingJob.findUnique({
-    where: {
-      id: trainingJobId,
-    },
-  });
-
-  if (!trainingJob) {
-    return failBackgroundJob({
-      backgroundJobId,
-      message: "Fine-tune launch failed because the training job no longer exists.",
-    });
-  }
-
-  await prisma.trainingJob.update({
-    where: {
-      id: trainingJobId,
-    },
-    data: {
-      status: "completed",
-      progress: 100,
-      gpuHours: Math.max(trainingJob.gpuHours, 3.8),
-      startedAt: trainingJob.startedAt ?? new Date(Date.now() - 1000 * 60 * 42),
-      finishedAt: new Date(),
-      checkpoint: "Artifacts synced to provider storage",
-    },
-  });
-
-  return completeBackgroundJob({
-    backgroundJobId,
-    message: "Fine-tune worker finished and synced the final artifacts back into FinetuneOps.",
-    result: {
-      trainingJobId,
-      status: "completed",
-    },
-  });
-}
 
 async function runNotificationJob(backgroundJobId: string) {
   await updateBackgroundJobProgress({
@@ -659,9 +547,12 @@ export async function processBackgroundJobById(backgroundJobId: string) {
     case "run-experiment":
       return runExperimentJob(backgroundJobId, payload);
     case "run-tra-analysis":
-      return runTraAnalysisJob(backgroundJobId, payload);
     case "launch-finetune":
-      return runLaunchFineTuneJob(backgroundJobId, payload);
+    case "run-recovery-job":
+      // These job types are processed exclusively by the BullMQ worker fleet
+      // (runtime.ts + tra-worker.ts + recovery-worker.ts). If this HTTP path is
+      // called for them it means a manual retry — treat as a maintenance pass.
+      return runMaintenanceJob(backgroundJobId, job.jobType as BackgroundJobType);
     case "send-notification":
       return runNotificationJob(backgroundJobId);
     case "poll-finetune":

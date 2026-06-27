@@ -51,14 +51,14 @@ export async function runRecovery(traReportId: string): Promise<RecoveryResult> 
     .filter((idx) => idx !== -1);
 
   const dateStr = new Date().toISOString().split("T")[0];
-  const newDatasetName = `${originalDataset.name} — recovered ${dateStr}`;
+  const newDatasetName = `${originalDataset.name} — cleaned ${dateStr}`;
 
   const newDataset = await prisma.dataset.create({
     data: {
       projectId: originalDataset.projectId,
       name: newDatasetName,
-      version: `${originalDataset.version}-recovered`,
-      source: "One-Click Recovery",
+      version: `${originalDataset.version}-cleaned`,
+      source: "One-Click Dataset Cleanup",
       status: "processing",
       rowCount: keepExamples.length,
     },

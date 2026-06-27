@@ -7,6 +7,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { sendSlackMessage } from "@/lib/slack";
 import { runTraAnalysis } from "@/lib/tra-engine";
+import { getActiveCredential } from "@/lib/provider-credentials";
 import type { WorkerJobData } from "./runtime";
 import { workerLogger } from "./logger";
 
@@ -84,6 +85,8 @@ export async function handleRunTraAnalysisJob(job: Job<WorkerJobData>) {
       estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 3),
     });
 
+    const credential = await getActiveCredential(job.data.organizationId, "openai");
+
     const analysis = await runTraAnalysis({
       regressionMetric: alert.metric,
       baselineScore: alert.baselineScore,
@@ -95,7 +98,7 @@ export async function handleRunTraAnalysisJob(job: Job<WorkerJobData>) {
         outputText: example.outputText,
         metadata: example.metadata,
       })),
-    });
+    }, credential || undefined);
 
     const report = await prisma.traReport.upsert({
       where: {
@@ -106,7 +109,7 @@ export async function handleRunTraAnalysisJob(job: Job<WorkerJobData>) {
         rootCauseCategory: analysis.rootCauseCategory,
         summary: analysis.summary,
         recommendedAction: analysis.recommendedAction,
-        estimatedRecovery: analysis.estimatedRecovery,
+        impactRating: analysis.impactRating,
       },
       create: {
         regressionAlertId,
@@ -114,7 +117,7 @@ export async function handleRunTraAnalysisJob(job: Job<WorkerJobData>) {
         rootCauseCategory: analysis.rootCauseCategory,
         summary: analysis.summary,
         recommendedAction: analysis.recommendedAction,
-        estimatedRecovery: analysis.estimatedRecovery,
+        impactRating: analysis.impactRating,
       },
     });
 

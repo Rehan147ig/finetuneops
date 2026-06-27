@@ -105,24 +105,44 @@ export default async function RegressionDetailPage({
               <p className="eyebrow">Recommended Action</p>
               <p>{alert.traReport.recommendedAction}</p>
               <p className="muted mt-2">
-                Estimated recovery: +{alert.traReport.estimatedRecovery.toFixed(2)} to {alert.metric}
+                Impact Rating: <strong>{alert.traReport.impactRating}</strong>
               </p>
             </div>
 
             <div className="panel mb-6">
-              <p className="eyebrow mb-4">One-Click Recovery</p>
+              <p className="eyebrow mb-4">One-Click Dataset Cleanup</p>
               {!alert.traReport.recoveryJob && (
                 <ActionForm action={applyRecoveryAction}>
                   <input type="hidden" name="traReportId" value={alert.traReport.id} />
-                  <ActionSubmitButton idleLabel="Apply One-Click Recovery" pendingLabel="Starting Recovery..." />
+                  <ActionSubmitButton idleLabel="Clean Dataset" pendingLabel="Building Dataset..." />
                 </ActionForm>
               )}
               {(alert.traReport.recoveryJob?.status === "PENDING" || alert.traReport.recoveryJob?.status === "RUNNING") && (
                 <p className="muted">Recovery in progress... <span className="animate-pulse">⏳</span></p>
               )}
+              {alert.traReport.recoveryJob?.status === "RETRAINING" && (
+                <div>
+                  <p className="text-green-600 mb-2">✓ Clean dataset built — retrain in progress</p>
+                  <p className="muted mb-3">
+                    Removed {alert.traReport.recoveryJob.removedExampleCount} suspicious examples and
+                    queued a retrain on the clean dataset. The regression will be re-tested automatically
+                    when the new eval completes.
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    <Link href={`/datasets/${alert.traReport.recoveryJob.newDatasetId}`} className="button">
+                      View Cleaned Dataset
+                    </Link>
+                    {alert.traReport.recoveryJob.retrainJobId && (
+                      <Link href="/jobs" className="secondary-button">
+                        View Retrain Job
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )}
               {alert.traReport.recoveryJob?.status === "COMPLETE" && (
                 <div>
-                  <p className="text-green-600 mb-2">✓ Recovery complete</p>
+                  <p className="text-green-600 mb-2">✓ Recovery verified</p>
                   <Link href={`/datasets/${alert.traReport.recoveryJob.newDatasetId}`} className="button">
                     View Cleaned Dataset
                   </Link>
@@ -139,7 +159,13 @@ export default async function RegressionDetailPage({
               )}
             </div>
             
-            <p className="eyebrow mb-4">Top Suspicious Examples ({alert.traReport.suspiciousExamples.length})</p>
+            <p className="eyebrow mb-2">Top Suspicious Examples ({alert.traReport.suspiciousExamples.length})</p>
+            <p className="muted mb-4" style={{ fontSize: "0.8em", opacity: 0.85 }}>
+              TRA does not scan every row exhaustively. Label-noise detection samples up to 40 rows,
+              instruction-conflict detection runs in batches of 8, duplicate and class-imbalance are
+              statistical, and only the top 10 ranked examples are shown. For large datasets this is
+              a sample, not a full audit.
+            </p>
             <table className="table">
               <thead>
                 <tr>
@@ -170,7 +196,7 @@ export default async function RegressionDetailPage({
           description="TRA has not yet analyzed this regression."
           action="Pending"
         >
-          <p className="muted">Click "Analyze with TRA" from the main regressions page to run the analysis.</p>
+          <p className="muted">Click &ldquo;Analyze with TRA&rdquo; from the main regressions page to run the analysis.</p>
         </SectionCard>
       )}
     </div>

@@ -35,6 +35,7 @@
     "@sentry/nextjs": "^10.49.0",
     "bcryptjs": "^3.0.2",
     "bullmq": "^5.75.2",
+    "compromise": "^14.15.1",
     "ioredis": "^5.10.1",
     "next": "16.2.4",
     "next-auth": "^5.0.0-beta.30",

@@ -78,7 +78,7 @@ describe("tra-engine", () => {
   it("duplicate conflict finder flags near-duplicate inputs with different outputs", () => {
     const result = duplicateConflictFinder(examples);
 
-    expect(result).toEqual(
+    expect(result.suspicious).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           exampleId: "ex_1",

@@ -129,7 +129,8 @@ export function AppShell({ children }: AppShellProps) {
     pathname.startsWith("/docs") ||
     pathname.startsWith("/sign-in") ||
     pathname.startsWith("/sign-up") ||
-    pathname.startsWith("/review/");
+    pathname.startsWith("/review/") ||
+    pathname.startsWith("/landing");
 
   if (isPublicRoute) {
     return <>{children}</>;

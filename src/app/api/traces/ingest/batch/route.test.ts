@@ -9,11 +9,13 @@ const {
   enforceTraceLimit,
   incrementTraceUsage,
   enqueueBackgroundJob,
+  enqueueBackgroundJobsBatch,
   checkRateLimit,
   rateLimitHeaders,
   getQueueStats,
   shouldApplyBackpressure,
   loggerWarn,
+  loggerError,
 } = vi.hoisted(() => ({
   mockPrisma: {
     project: {
@@ -22,6 +24,10 @@ const {
     traceEvent: {
       create: vi.fn(),
     },
+    activityLog: {
+      createMany: vi.fn(),
+    },
+    $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
   },
   recordActivityEvent: vi.fn(),
   getDefaultUserId: vi.fn(),
@@ -30,11 +36,13 @@ const {
   enforceTraceLimit: vi.fn(),
   incrementTraceUsage: vi.fn(),
   enqueueBackgroundJob: vi.fn(),
+  enqueueBackgroundJobsBatch: vi.fn(),
   checkRateLimit: vi.fn(),
   rateLimitHeaders: vi.fn(),
   getQueueStats: vi.fn(),
   shouldApplyBackpressure: vi.fn(),
   loggerWarn: vi.fn(),
+  loggerError: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -56,6 +64,7 @@ vi.mock("@/lib/billing-data", () => ({
 
 vi.mock("@/lib/background-jobs", () => ({
   enqueueBackgroundJob,
+  enqueueBackgroundJobsBatch,
 }));
 
 vi.mock("@/lib/workspace-data", () => ({
@@ -76,6 +85,7 @@ vi.mock("@/lib/queue-monitor", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: {
     warn: loggerWarn,
+    error: loggerError,
   },
 }));
 
@@ -95,6 +105,7 @@ describe("POST /api/traces/ingest/batch", () => {
     });
     incrementTraceUsage.mockResolvedValue(undefined);
     enqueueBackgroundJob.mockResolvedValue(undefined);
+    enqueueBackgroundJobsBatch.mockResolvedValue(undefined);
     recordActivityEvent.mockResolvedValue(undefined);
     checkRateLimit.mockResolvedValue({
       allowed: true,
@@ -171,8 +182,8 @@ describe("POST /api/traces/ingest/batch", () => {
         error: "input must be at least 8 characters long.",
       },
     ]);
-    expect(enqueueBackgroundJob).toHaveBeenCalledTimes(2);
-    expect(incrementTraceUsage).toHaveBeenCalledTimes(2);
+    expect(enqueueBackgroundJobsBatch).toHaveBeenCalledTimes(1);
+    expect(incrementTraceUsage).toHaveBeenCalledWith("org_1", 2);
     expect(response.headers.get("X-RateLimit-Limit")).toBe("1000");
   });
 
