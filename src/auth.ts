@@ -23,6 +23,10 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   },
   session: {
     strategy: "jwt",
+    // 8-hour token lifetime: role/org changes propagate within one working day.
+    // Without this, NextAuth defaults to 30 days — a revoked member keeps
+    // access until their old token expires.
+    maxAge: 8 * 60 * 60,
   },
   providers: [
     Credentials({
@@ -103,6 +107,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       return true;
     },
     async jwt({ token, user }) {
+      // On initial sign-in: populate claims from DB.
       if (user?.email) {
         const dbUser = await prisma.user.findUnique({
           where: {
@@ -118,6 +123,29 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           token.role = dbUser.role;
           token.organizationId = dbUser.organizationId;
           token.workspaceSlug = dbUser.organization.slug;
+          token.claimsRefreshedAt = Date.now();
+        }
+      }
+
+      // Re-fetch claims every 15 minutes so role changes and offboarding
+      // propagate within one check interval rather than waiting for the full
+      // 8-hour token lifetime.
+      const refreshedAt = typeof token.claimsRefreshedAt === "number" ? token.claimsRefreshedAt : 0;
+      const fifteenMinutes = 15 * 60 * 1000;
+      if (token.sub && Date.now() - refreshedAt > fifteenMinutes) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.sub },
+          include: { organization: true },
+        });
+
+        if (dbUser) {
+          token.role = dbUser.role;
+          token.organizationId = dbUser.organizationId;
+          token.workspaceSlug = dbUser.organization.slug;
+          token.claimsRefreshedAt = Date.now();
+        } else {
+          // User deleted — invalidate the token so next request returns 401.
+          return null as unknown as typeof token;
         }
       }
 

@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parseActivityMetadata,
   sortActivityLogEntries,
   toActivityItem,
 } from "./workspace-data";
 import type { ActivityLogEntry } from "./types";
+
+// workspace-data imports prisma at the module level; mock it so tests
+// don't require a live PrismaClient / Prisma engine binary.
+vi.mock("./prisma", () => ({
+  prisma: {
+    activityLog: { findMany: vi.fn(), create: vi.fn() },
+    reviewLink: { findUnique: vi.fn() },
+  },
+}));
 
 describe("sortActivityLogEntries", () => {
   it("orders newer events before older ones", () => {

@@ -86,16 +86,7 @@ export async function authenticateWorkspaceApiKey(plaintext: string) {
       revokedAt: null,
     },
     include: {
-      organization: {
-        include: {
-          projects: {
-            orderBy: {
-              createdAt: "asc",
-            },
-            take: 1,
-          },
-        },
-      },
+      organization: true,
     },
   });
 
@@ -114,7 +105,6 @@ export async function authenticateWorkspaceApiKey(plaintext: string) {
 
   return {
     organizationId: apiKey.organizationId,
-    projectId: apiKey.organization.projects[0]?.id,
     apiKeyId: apiKey.id,
   };
 }
