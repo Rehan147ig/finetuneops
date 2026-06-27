@@ -38,9 +38,15 @@ export async function runRecovery(traReportId: string): Promise<RecoveryResult> 
   const originalDataset = traReport.regressionAlert.candidateRun.dataset;
   const suspiciousExamples = traReport.suspiciousExamples;
 
+  // Only auto-remove examples the analysis is HIGHLY confident about. This bar
+  // matches TRA's "high confidence" threshold (0.75); auto-deleting training
+  // rows on a weaker (e.g. 0.6) signal is unsafe. Confidence is the analysis /
+  // LLM-judge's self-reported score, and recovery is non-destructive (it writes
+  // a new cleaned dataset version rather than mutating the original).
+  const HIGH_CONFIDENCE_THRESHOLD = 0.75;
   const removeIds = new Set(
     suspiciousExamples
-      .filter((ex) => ex.confidence > 0.6)
+      .filter((ex) => ex.confidence >= HIGH_CONFIDENCE_THRESHOLD)
       .map((ex) => ex.exampleId)
   );
 

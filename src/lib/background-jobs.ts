@@ -2,7 +2,7 @@ import { Queue } from "bullmq";
 import { getServerEnv } from "@/lib/env";
 import { CacheKeys, invalidate } from "@/lib/cache";
 import { prisma } from "@/lib/prisma";
-import { buildDatasetQualityReport } from "@/lib/quality-engine";
+import { buildDatasetQualityReport, checkPiiDetection } from "@/lib/quality-engine";
 import { runTraAnalysis } from "@/lib/tra-engine";
 import { recordActivityEvent } from "@/lib/workspace-data";
 
@@ -306,21 +306,66 @@ async function runIngestTraceJob(backgroundJobId: string) {
   });
 }
 
-async function runSafetyScanJob(backgroundJobId: string) {
+async function runSafetyScanJob(backgroundJobId: string, payload: Record<string, unknown>) {
+  const traceId = typeof payload.traceId === "string" ? payload.traceId : null;
+
   await updateBackgroundJobProgress({
     backgroundJobId,
     progress: 55,
     status: "running",
-    message: "Scanning the trace for risky content and prompt-injection signals.",
-    estimatedCompletionAt: new Date(Date.now() + 1000 * 60 * 2),
+    message: "Scanning the trace for PII and risky content.",
+    estimatedCompletionAt: new Date(Date.now() + 1000 * 60),
+  });
+
+  if (!traceId) {
+    return failBackgroundJob({
+      backgroundJobId,
+      message: "Safety scan could not start because traceId is missing.",
+    });
+  }
+
+  const trace = await prisma.traceEvent.findUnique({ where: { id: traceId } });
+
+  if (!trace) {
+    return failBackgroundJob({
+      backgroundJobId,
+      message: "Safety scan failed because the trace no longer exists.",
+    });
+  }
+
+  // Real PII scan via the quality engine — no fabricated "safe" verdict.
+  const pii = checkPiiDetection([
+    { id: trace.id, input: trace.inputText ?? trace.title, output: trace.outputText ?? "" },
+  ]);
+  const categories = Array.from(new Set(pii.flagged.flatMap((item) => item.categories)));
+  const hasPii = pii.detected > 0;
+
+  await prisma.traceEvent.update({
+    where: { id: trace.id },
+    data: {
+      severity: hasPii ? "high" : trace.severity,
+      status: hasPii ? "needs_labeling" : trace.status,
+      metadata: JSON.stringify({
+        ...parseJobPayload(trace.metadata),
+        safety: {
+          piiDetected: hasPii,
+          piiCount: pii.detected,
+          categories,
+          scannedAt: new Date().toISOString(),
+        },
+      }),
+    },
   });
 
   return completeBackgroundJob({
     backgroundJobId,
-    message: "Safety scan completed without blocking issues.",
+    message: hasPii
+      ? `Safety scan flagged ${pii.detected} PII signal(s); trace marked for review.`
+      : "Safety scan found no PII signals.",
     result: {
-      safetyScore: 0.08,
-      verdict: "safe",
+      piiDetected: hasPii,
+      piiCount: pii.detected,
+      categories,
     },
   });
 }
@@ -473,26 +518,25 @@ async function runExperimentJob(backgroundJobId: string, payload: Record<string,
     });
   }
 
-  const nextScore = Math.min((experiment.score ?? 0) + 2.2, 97);
-  const nextStatus = nextScore >= 85 ? "promote" : nextScore >= 75 ? "review" : "running";
-
+  // Automated experiment evaluation (running the candidate model over the
+  // dataset and scoring it) is not implemented yet. Do NOT fabricate an
+  // improved score — move the experiment to "review" for a human to evaluate
+  // and leave the score untouched rather than inventing progress.
   await prisma.experimentRun.update({
     where: {
       id: experimentId,
     },
     data: {
-      score: nextScore,
-      status: nextStatus,
+      status: "review",
     },
   });
 
   return completeBackgroundJob({
     backgroundJobId,
-    message: "Experiment evaluation completed and the candidate verdict has been refreshed.",
+    message: "Experiment marked for manual review. Automated candidate scoring is not enabled yet.",
     result: {
       experimentId,
-      score: nextScore,
-      status: nextStatus,
+      status: "review",
     },
   });
 }
@@ -541,7 +585,7 @@ export async function processBackgroundJobById(backgroundJobId: string) {
     case "ingest-trace":
       return runIngestTraceJob(backgroundJobId);
     case "safety-scan":
-      return runSafetyScanJob(backgroundJobId);
+      return runSafetyScanJob(backgroundJobId, payload);
     case "score-dataset":
       return runScoreDatasetJob(backgroundJobId, payload);
     case "run-experiment":

@@ -81,10 +81,14 @@ services:
 
   redis:
     image: redis:7-alpine
+    # noeviction is REQUIRED by BullMQ: allkeys-lru can evict queued job keys
+    # under memory pressure and silently drop fine-tune/notification work.
+    # Cache + rate-limit keys here all set TTLs, so they expire rather than
+    # needing eviction. At scale, run a separate cache Redis (allkeys-lru).
     command: >
       redis-server
       --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --appendonly yes
     ports:
       - "6379:6379"
