@@ -17,13 +17,13 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 describe("recovery-engine", () => {
-  it("runRecovery removes examples with confidence > 0.6 and creates a new dataset", async () => {
+  it("runRecovery removes high-confidence (>= 0.75) examples and creates a new dataset", async () => {
     vi.mocked(prisma.traReport.findUnique).mockResolvedValue({
       id: "report_1",
       suspiciousExamples: [
         { exampleId: "ex_1", confidence: 0.9 },
         { exampleId: "ex_2", confidence: 0.5 },
-        { exampleId: "ex_3", confidence: 0.7 },
+        { exampleId: "ex_3", confidence: 0.8 },
       ],
       regressionAlert: {
         candidateRun: {

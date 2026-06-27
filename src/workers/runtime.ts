@@ -1105,6 +1105,86 @@ export async function handleGenericBackgroundJob(job: Job<WorkerJobData>) {
   });
 }
 
+export async function handleSafetyScanJob(job: Job<WorkerJobData>) {
+  return runWorkerJob("safety-scan", job, async (currentJob) => {
+    const payload = parsePayloadObject(currentJob.data.payload);
+    const traceId = typeof payload.traceId === "string" ? payload.traceId : null;
+
+    if (!traceId) {
+      await failBackgroundJob({
+        backgroundJobId: currentJob.data.backgroundJobId,
+        message: "Safety scan could not start because traceId is missing.",
+      });
+      throw new Error("Safety scan requires traceId");
+    }
+
+    await updateBackgroundJobProgress({
+      backgroundJobId: currentJob.data.backgroundJobId,
+      progress: 55,
+      status: "running",
+      message: "Scanning the trace for PII and risky content.",
+      estimatedCompletionAt: new Date(Date.now() + 1000 * 30),
+    });
+
+    // Tenant-scoped lookup so a scan can never touch another workspace's trace.
+    const trace = await prisma.traceEvent.findFirst({
+      where: { id: traceId, project: { organizationId: currentJob.data.organizationId } },
+    });
+
+    if (!trace) {
+      await failBackgroundJob({
+        backgroundJobId: currentJob.data.backgroundJobId,
+        message: "Safety scan failed because the trace no longer exists.",
+      });
+      throw new Error("Trace not found for safety scan");
+    }
+
+    // Real PII scan via the quality engine — no fabricated "safe" verdict.
+    const pii = checkPiiDetection([
+      { id: trace.id, input: trace.inputText ?? trace.title, output: trace.outputText ?? "" },
+    ]);
+    const categories = Array.from(new Set(pii.flagged.flatMap((item) => item.categories)));
+    const hasPii = pii.detected > 0;
+
+    let existingMeta: Record<string, unknown> = {};
+    try {
+      existingMeta = JSON.parse(trace.metadata) as Record<string, unknown>;
+    } catch {
+      existingMeta = {};
+    }
+
+    await prisma.traceEvent.update({
+      where: { id: trace.id },
+      data: {
+        severity: hasPii ? "high" : trace.severity,
+        status: hasPii ? "needs_labeling" : trace.status,
+        metadata: JSON.stringify({
+          ...existingMeta,
+          safety: {
+            piiDetected: hasPii,
+            piiCount: pii.detected,
+            categories,
+            scannedAt: new Date().toISOString(),
+          },
+        }),
+      },
+    });
+
+    return completeBackgroundJob({
+      backgroundJobId: currentJob.data.backgroundJobId,
+      message: hasPii
+        ? `Safety scan flagged ${pii.detected} PII signal(s); trace marked for review.`
+        : "Safety scan found no PII signals.",
+      result: {
+        traceId: trace.id,
+        piiDetected: hasPii,
+        piiCount: pii.detected,
+        categories,
+      },
+    });
+  });
+}
+
 export function createWorkerProcessor(jobType: BackgroundJobType) {
   switch (jobType) {
     case "ingest-trace":
@@ -1121,6 +1201,8 @@ export function createWorkerProcessor(jobType: BackgroundJobType) {
       return handlePollFineTuneJob;
     case "send-notification":
       return handleSendNotificationJob;
+    case "safety-scan":
+      return handleSafetyScanJob;
     default:
       return handleGenericBackgroundJob;
   }

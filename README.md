@@ -63,7 +63,7 @@ Current limitation:
 
 - Regression alerts exist in the database, but the dedicated regressions UI is not built yet.
 - Team-defined thresholds are not configurable in the UI yet.
-- TRA analysis does not yet explain which training examples caused the regression.
+- TRA surfaces the training examples most likely *associated* with a regression, ranked by the analysis/LLM-judge's self-reported confidence. It does not prove causation, and those confidence scores are not yet calibrated against ground truth.
 
 Why it matters:
 
@@ -88,7 +88,9 @@ Now built:
 - `run-tra-analysis` worker.
 - `/regressions` UI for alerts and full TRA reports.
 
-The intended output (now live):
+Example output. The percentages are the analysis/LLM-judge's self-reported
+confidence (not calibrated probabilities), and the listed examples are
+candidates for human review, not proven causes:
 
 ```text
 Regression detected: billing_accuracy dropped from 87% to 63%.
@@ -101,8 +103,8 @@ Example #512 - Duplicate conflict - 86% confidence
 
 Why it matters:
 
-Dashboards show symptoms. TRA should identify the training examples most
-likely responsible for the regression.
+Dashboards show symptoms. TRA surfaces the training examples most likely
+associated with the regression as ranked candidates for human review.
 
 ### 3. One-Click Recovery - Built
 
@@ -214,7 +216,7 @@ FinetuneOps should own that failure-to-fix workflow.
 
 ```bash
 npm install
-npm run db:push
+npm run db:push:dev
 npm run db:seed
 npm run dev
 ```
@@ -238,7 +240,7 @@ The container startup automatically:
 npm test
 npm run build
 npm run db:generate
-npm run db:push
+npm run db:push:dev
 npm run sdk:test
 npm run sdk:build
 ```
