@@ -2,6 +2,12 @@ export type FinetuneOpsConfig = {
   apiKey: string;
   baseUrl?: string;
   workspace?: string;
+  /**
+   * Optional project slug or ID to route all traces to a specific project.
+   * When omitted, traces land in the oldest project in the workspace (default behaviour).
+   * Recommended: set this explicitly when you have multiple projects.
+   */
+  projectId?: string;
   batchSize?: number;
   flushIntervalMs?: number;
   debug?: boolean;

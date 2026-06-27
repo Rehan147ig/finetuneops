@@ -30,6 +30,15 @@ export async function checkRateLimit(
     const redis = getRedisClient();
 
     if (!redis) {
+      // Deliberate fail-open: rate limiting is a soft defence; we prefer to
+      // serve traffic over hard-failing when Redis is unavailable.
+      // Alert fires via the log event — monitor "rate_limit_unavailable" in prod.
+      logger.warn({
+        event: "rate_limit_unavailable",
+        reason: "no_redis_client",
+        tier,
+        organizationId,
+      });
       return { allowed: true, limit, remaining: limit, reset };
     }
 

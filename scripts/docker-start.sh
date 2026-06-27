@@ -4,8 +4,8 @@ set -eu
 echo "Generating Prisma client..."
 npm run db:generate >/dev/null
 
-echo "Applying database schema..."
-npx prisma db push --skip-generate >/dev/null
+echo "Running database migrations..."
+npx prisma migrate deploy
 
 if [ "${RUN_DEMO_SEED:-true}" = "true" ]; then
   echo "Seeding demo workspace..."

@@ -78,14 +78,21 @@ export const POST = withApiErrorHandling("trace_batch_ingest_failed", async (req
     );
   }
 
-  const project = await prisma.project.findFirst({
-    where: {
-      organizationId,
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
+  // Honour the x-finetuneops-project header (slug or id) sent by the SDK.
+  // Falls back to the oldest project when not provided for backwards compat.
+  const projectHint = request.headers.get("x-finetuneops-project")?.trim() || null;
+
+  const project = projectHint
+    ? await prisma.project.findFirst({
+        where: {
+          organizationId,
+          OR: [{ id: projectHint }, { slug: projectHint }],
+        },
+      })
+    : await prisma.project.findFirst({
+        where: { organizationId },
+        orderBy: { createdAt: "asc" },
+      });
 
   if (!project) {
     return NextResponse.json(

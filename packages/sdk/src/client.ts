@@ -52,6 +52,7 @@ export class FinetuneOps {
       apiKey: config.apiKey,
       baseUrl: config.baseUrl ?? "https://api.finetuneops.com",
       workspace: config.workspace ?? "",
+      projectId: config.projectId ?? "",
       batchSize: config.batchSize ?? 10,
       flushIntervalMs: config.flushIntervalMs ?? 5000,
       debug: config.debug ?? false,
@@ -220,6 +221,10 @@ export class FinetuneOps {
 
     if (this.config.workspace) {
       headers["x-finetuneops-workspace"] = this.config.workspace;
+    }
+
+    if (this.config.projectId) {
+      headers["x-finetuneops-project"] = this.config.projectId;
     }
 
     const runRequest = async () => {

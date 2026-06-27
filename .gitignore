@@ -12,3 +12,10 @@ coverage
 .env.production.local
 prisma/dev.db
 prisma/dev.db-journal
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Test output artifacts
+test-results/
+playwright-report/

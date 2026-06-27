@@ -5,6 +5,7 @@ const {
   mockRegressionAlertUpsert,
   mockLoggerError,
   mockEnqueueBackgroundJob,
+  mockProjectFindUnique,
 } = vi.hoisted(() => ({
   mockEvalRunFindFirst: vi.fn(),
   mockRegressionAlertUpsert: vi.fn(),

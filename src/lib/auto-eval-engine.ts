@@ -55,6 +55,13 @@ export function jaccardSimilarity(textA: string, textB: string): number {
 }
 
 export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult> {
+  // Check credential first — cheaper than a dataset fetch and gives a clear
+  // error before doing any work.
+  const apiKey = await getActiveCredential(input.organizationId, "openai");
+  if (!apiKey) {
+    throw new Error("No active OpenAI credential found.");
+  }
+
   const totalCount = await prisma.datasetExample.count({
     where: { datasetId: input.datasetId },
   });
@@ -77,11 +84,6 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
 
   const sampledCount = dataset.examples.length;
 
-  const apiKey = await getActiveCredential(input.organizationId, "openai");
-  if (!apiKey) {
-    throw new Error("No active OpenAI credential found.");
-  }
-
   const evalRun = await prisma.evalRun.create({
     data: {
       projectId: input.projectId,
@@ -92,7 +94,7 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
       benchmark: "auto-eval",
       status: "running",
       // judge field reflects whether LLM-as-judge is active
-      judge: apiKey ? "llm-jaccard-blend" : "exact-match-jaccard",
+      judge: "llm-jaccard-blend",
     },
   });
 
