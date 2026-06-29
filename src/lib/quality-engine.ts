@@ -87,6 +87,10 @@ function uniqueTrigrams(value: string) {
   return grams;
 }
 
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 export function checkDuplicateDetection(examples: QualityExample[]): DuplicateCheckResult {
   const pairs: DuplicateCheckResult["pairs"] = [];
 
@@ -184,6 +188,7 @@ export function checkLengthAnalysis(examples: QualityExample[]): LengthCheckResu
 }
 
 export function checkPiiDetection(examples: QualityExample[]): PiiCheckResult {
+  // Structured PII: high-precision regexes for formats with a known shape.
   const regexMap = {
     email: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
     phone: /\+?\d[\d\s().-]{7,}\d/g,
@@ -200,37 +205,65 @@ export function checkPiiDetection(examples: QualityExample[]): PiiCheckResult {
     organization: 0,
     place: 0,
   };
+
   const flagged: PiiCheckResult["flagged"] = [];
 
   for (const example of examples) {
     const haystack = `${example.input}\n${example.output ?? ""}`;
     const hits: string[] = [];
 
-    // 1. Regex checks
-    for (const [category, regex] of Object.entries(regexMap) as Array<[keyof typeof regexMap, RegExp]>) {
+    // 1) Structured PII via regex (email, phone, ssn, credit_card).
+    for (const [category, regex] of Object.entries(regexMap) as Array<
+      [keyof typeof regexMap, RegExp]
+    >) {
       if (regex.test(haystack)) {
         categories[category] += 1;
         hits.push(category);
       }
     }
 
-    // 2. NLP-based checks for Names, Orgs, Places (compromise)
+    // 2) Named-entity PII via compromise NLP (person, organization, place).
+    // Regex cannot detect free-text names like "Contact John Smith" or
+    // "Ship to 123 Main St, Springfield" — NER is required for real GDPR /
+    // EU AI Act compliance coverage.
     try {
       const doc = nlp(haystack);
-      if (doc.people().length > 0) {
+
+      // Only count an entity category if it produces a non-trivial match.
+      // compromise can over-match capitalized words, so we filter out very
+      // common false-positive single tokens to keep precision reasonable.
+      const people = doc
+        .people()
+        .out("array") as unknown;
+      const personNames = toStringArray(people)
+        .filter((name) => name.trim().length > 2);
+      if (personNames.length > 0) {
         categories.person += 1;
         hits.push("person");
       }
-      if (doc.organizations().length > 0) {
-        categories.organization += 1;
-        hits.push("organization");
-      }
-      if (doc.places().length > 0) {
+
+      const places = doc
+        .places()
+        .out("array") as unknown;
+      const placeNames = toStringArray(places)
+        .filter((place) => place.trim().length > 2);
+      if (placeNames.length > 0) {
         categories.place += 1;
         hits.push("place");
       }
+
+      const organizations = doc
+        .organizations()
+        .out("array") as unknown;
+      const organizationNames = toStringArray(organizations)
+        .filter((org) => org.trim().length > 2);
+      if (organizationNames.length > 0) {
+        categories.organization += 1;
+        hits.push("organization");
+      }
     } catch {
-      // ignore NLP errors gracefully
+      // If the NLP model throws (e.g. on malformed input), we still keep the
+      // regex-based hits. Never let PII detection crash the quality report.
     }
 
     if (hits.length > 0) {

@@ -116,4 +116,4 @@ jobs:
       # Confirm the standalone worker entrypoint type-checks. We exclude test
       # files to avoid test-only type noise (the worker ships no test code).
       - name: Type-check worker entrypoint
-        run: npx tsc --noEmit --skipLibCheck src/workers/index.ts src/workers/runtime.ts src/workers/recovery-worker.ts src/workers/tra-worker.ts
+        run: npx tsc --noEmit --skipLibCheck --incremental false -p tsconfig.worker.json

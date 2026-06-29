@@ -33,6 +33,10 @@ vi.mock("@/lib/audit", () => ({
 
 import { POST } from "./route";
 
+const request = new Request("http://localhost/api/admin/search/reindex", {
+  method: "POST",
+});
+
 describe("POST /api/admin/search/reindex", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,7 +65,7 @@ describe("POST /api/admin/search/reindex", () => {
   it("returns 401 without a session", async () => {
     auth.mockResolvedValue(null);
 
-    const response = await POST();
+    const response = await POST(request);
 
     expect(response.status).toBe(401);
   });
@@ -75,7 +79,7 @@ describe("POST /api/admin/search/reindex", () => {
       },
     });
 
-    const response = await POST();
+    const response = await POST(request);
     const body = await response.json();
 
     expect(response.status).toBe(403);
@@ -93,7 +97,7 @@ describe("POST /api/admin/search/reindex", () => {
       },
     });
 
-    const response = await POST();
+    const response = await POST(request);
     const body = await response.json();
 
     expect(response.status).toBe(200);

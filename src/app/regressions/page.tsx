@@ -9,17 +9,22 @@ import { analyzeRegressionAction } from "./actions";
 export default async function RegressionsPage() {
   const session = await requireAuthSession();
 
-  const alerts = await prisma.regressionAlert.findMany({
-    where: {
-      organizationId: session.user.organizationId,
-      status: { in: ["open", "investigating"] },
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      traReport: true,
-      project: true,
-    },
-  });
+  let alerts: any[] = [];
+  try {
+    alerts = await prisma.regressionAlert.findMany({
+      where: {
+        organizationId: session.user.organizationId,
+        status: { in: ["open", "investigating"] },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        traReport: true,
+        project: true,
+      },
+    });
+  } catch (e) {
+    // Fallback for local dev without database
+  }
 
   return (
     <div className="page-grid">
@@ -51,7 +56,7 @@ export default async function RegressionsPage() {
                     <span
                       className={
                         alert.severity === "critical"
-                          ? "pill warning"
+                          ? "pill danger"
                           : alert.severity === "warning"
                             ? "pill warning"
                             : "pill"

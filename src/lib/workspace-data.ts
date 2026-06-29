@@ -1,15 +1,4 @@
-import {
-  activeProject,
-  datasets as mockDatasets,
-  evals as mockEvals,
-  experiments as mockExperiments,
-  jobs as mockJobs,
-  metrics as mockMetrics,
-  releases as mockReleases,
-  traces as mockTraces,
-  workflow,
-  workspaceName,
-} from "@/lib/mock-data";
+// No mock data imports
 import { cached, CacheKeys, CacheTTL, invalidate } from "@/lib/cache";
 import { prisma } from "@/lib/prisma";
 import { isReviewLinkExpired } from "@/lib/review-links";
@@ -105,29 +94,6 @@ const activityKindByType: Record<ActivityEventType, ActivityItem["kind"]> = {
   subscription_cancelled: "release",
 };
 
-export const activityLog: ActivityLogEntry[] = [
-  {
-    id: "activity_fallback_trace",
-    type: "trace_captured",
-    message: "Fallback trace backlog was loaded from the local workspace snapshot",
-    timestamp: "2026-04-18T11:30:00.000Z",
-    userId: "system",
-    metadata: {
-      source: "fallback",
-    },
-  },
-  {
-    id: "activity_fallback_release",
-    type: "release_approved",
-    message: "Fallback release review is waiting on an approver decision",
-    timestamp: "2026-04-18T08:15:00.000Z",
-    userId: "system",
-    metadata: {
-      channel: "staging",
-    },
-  },
-];
-
 export function sortActivityLogEntries(entries: ActivityLogEntry[]): ActivityLogEntry[] {
   return [...entries].sort((left, right) => {
     return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
@@ -161,15 +127,6 @@ export async function recordActivityEvent(payload: ActivityLogPayload) {
       metadata: JSON.stringify(payload.metadata ?? {}),
       timestamp: payload.timestamp ?? new Date(),
     },
-  });
-
-  activityLog.unshift({
-    id: entry.id,
-    type: entry.type as ActivityEventType,
-    message: entry.message,
-    timestamp: entry.timestamp.toISOString(),
-    userId: entry.userId,
-    metadata: parseActivityMetadata(entry.metadata),
   });
 
   const project = await prisma.project.findUnique({
@@ -257,39 +214,33 @@ function toTraceRecord(item: TraceListItem): TraceRecord {
 }
 
 function fallbackTracePage(cursor?: string, limit = 20): TracePageResult {
-  const startIndex = cursor
-    ? Math.max(0, mockTraces.findIndex((item) => item.id === cursor) + 1)
-    : 0;
-  const rawPage = mockTraces.slice(startIndex, startIndex + limit + 1);
-  const traces = rawPage.slice(0, limit);
-
   return {
-    traces,
-    nextCursor: rawPage.length > limit ? traces[traces.length - 1]?.id ?? null : null,
+    traces: [],
+    nextCursor: null,
   };
 }
 
 function fallbackWorkspaceData(): WorkspaceData {
   return {
-    workspaceName,
-    activeProject,
+    workspaceName: "Fallback Workspace",
+    activeProject: "Fallback Project",
     summary: {
-      organizationName: workspaceName,
+      organizationName: "Fallback Workspace",
       billingPlan: "pro",
       projectCount: 1,
       memberCount: 3,
       activeProjectStatus: "active",
     },
-    workflow,
-    metrics: mockMetrics,
-    activity: sortActivityLogEntries(activityLog).map(toActivityItem),
-    traces: mockTraces,
-    datasets: mockDatasets,
-    experiments: mockExperiments,
-    jobs: mockJobs,
+    workflow: [],
+    metrics: [],
+    activity: [],
+    traces: [],
+    datasets: [],
+    experiments: [],
+    jobs: [],
     backgroundJobs: [],
-    evals: mockEvals,
-    releases: mockReleases,
+    evals: [],
+    releases: [],
   };
 }
 
@@ -305,32 +256,34 @@ export async function getWorkspacePlan(organizationId: string): Promise<Workspac
     CacheKeys.workspacePlan(organizationId),
     CacheTTL.workspacePlan,
     async () => {
-      const organization = await prisma.organization.findUnique({
-        where: {
-          id: organizationId,
-        },
-        select: {
-          name: true,
-          billingPlan: true,
-          _count: {
-            select: {
-              projects: true,
-              users: true,
+      try {
+        const organization = await prisma.organization.findUnique({
+          where: {
+            id: organizationId,
+          },
+          select: {
+            name: true,
+            billingPlan: true,
+            _count: {
+              select: {
+                projects: true,
+                users: true,
+              },
             },
           },
-        },
-      });
+        });
 
-      if (!organization) {
+        if (!organization) return null;
+
+        return {
+          organizationName: organization.name,
+          billingPlan: organization.billingPlan,
+          projectCount: organization._count.projects,
+          memberCount: organization._count.users,
+        };
+      } catch (e) {
         return null;
       }
-
-      return {
-        organizationName: organization.name,
-        billingPlan: organization.billingPlan,
-        projectCount: organization._count.projects,
-        memberCount: organization._count.users,
-      };
     },
   );
 }
@@ -340,37 +293,41 @@ export async function getActivityTimeline(organizationId: string): Promise<Activ
     CacheKeys.activityTimeline(organizationId),
     CacheTTL.activityTimeline,
     async () => {
-      const project = await prisma.project.findFirst({
-        where: {
-          organizationId,
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
-        select: {
-          activityLogs: {
-            orderBy: {
-              timestamp: "desc",
-            },
-            take: 12,
+      try {
+        const project = await prisma.project.findFirst({
+          where: {
+            organizationId,
           },
-        },
-      });
+          orderBy: {
+            createdAt: "asc",
+          },
+          select: {
+            activityLogs: {
+              orderBy: {
+                timestamp: "desc",
+              },
+              take: 12,
+            },
+          },
+        });
 
-      if (!project || project.activityLogs.length === 0) {
-        return sortActivityLogEntries(activityLog).map(toActivityItem);
+        if (!project || project.activityLogs.length === 0) {
+          return [];
+        }
+
+        return sortActivityLogEntries(
+          project.activityLogs.map((item) => ({
+            id: item.id,
+            type: item.type as ActivityEventType,
+            message: item.message,
+            timestamp: item.timestamp.toISOString(),
+            userId: item.userId,
+            metadata: item.metadata ? parseActivityMetadata(item.metadata) : {},
+          }))
+        ).map(toActivityItem);
+      } catch (e) {
+        return [];
       }
-
-      return sortActivityLogEntries(
-        project.activityLogs.map((item) => ({
-          id: item.id,
-          type: item.type as ActivityEventType,
-          message: item.message,
-          timestamp: item.timestamp.toISOString(),
-          userId: item.userId,
-          metadata: parseActivityMetadata(item.metadata),
-        })),
-      ).map(toActivityItem);
     },
   );
 }
@@ -450,7 +407,7 @@ export async function getWorkspaceData(scope?: WorkspaceScope): Promise<Workspac
           getWorkspacePlan(scope.organizationId),
           getActivityTimeline(scope.organizationId),
         ])
-      : [null, sortActivityLogEntries(activityLog).map(toActivityItem)];
+      : [null, []];
 
     const project = await prisma.project.findFirst({
       where: scope
@@ -506,18 +463,58 @@ export async function getWorkspaceData(scope?: WorkspaceScope): Promise<Workspac
     const aiSpend =
       project.trainingJobs.reduce((sum, item) => sum + item.gpuHours * 110, 0) +
       project.experiments.reduce((sum, item) => sum + (item.costEstimate ?? 0), 0);
+    const readyTraceCount = project.traceEvents.filter((item) => item.status === "ready_for_curation").length;
+    const runningExperimentCount = project.experiments.filter((item) => item.status === "running").length;
+    const activeJobCount = project.trainingJobs.filter((item) =>
+      item.status === "queued" || item.status === "running",
+    ).length;
+    const passingEvalCount = project.evalRuns.filter((item) => item.status === "passing").length;
+    const liveReleaseCount = project.releases.filter((item) => item.status === "live").length;
+    const workflowStages: WorkflowStage[] = [
+      {
+        title: "Trace intake",
+        status: readyTraceCount > 0 ? `${readyTraceCount} ready` : "Monitoring",
+        detail: `${project.traceEvents.length} traces captured for triage and promotion.`,
+      },
+      {
+        title: "Dataset curation",
+        status: readyDatasets > 0 ? `${readyDatasets} ready` : "Needs review",
+        detail: `${project.datasets.length} dataset versions are tracked in this workspace.`,
+      },
+      {
+        title: "Experimentation",
+        status: runningExperimentCount > 0 ? `${runningExperimentCount} running` : `${experimentWins} winners`,
+        detail: `${project.experiments.length} candidates compared against baseline behavior.`,
+      },
+      {
+        title: "Fine-tuning",
+        status: activeJobCount > 0 ? `${activeJobCount} active` : "No active jobs",
+        detail: `${project.trainingJobs.length} training jobs connected to experiments and datasets.`,
+      },
+      {
+        title: "Evaluation",
+        status: passingEvalCount > 0 ? `${passingEvalCount} passing` : "Watch list",
+        detail: `${project.evalRuns.length} eval runs guard quality before release.`,
+      },
+      {
+        title: "Release",
+        status: liveReleaseCount > 0 ? `${liveReleaseCount} live` : "Approval gated",
+        detail: `${project.releases.length} releases are staged, approved, or live.`,
+      },
+    ];
 
     return {
-      workspaceName: planSnapshot?.organizationName ?? project.organization?.name ?? workspaceName,
+      workspaceName: planSnapshot?.organizationName ?? project.organization?.name ?? "Production Workspace",
       activeProject: project.name,
       summary: {
-        organizationName: planSnapshot?.organizationName ?? project.organization?.name ?? workspaceName,
+        organizationName: planSnapshot?.organizationName ?? project.organization?.name ?? "Production Workspace",
         billingPlan: planSnapshot?.billingPlan ?? project.organization?.billingPlan ?? "starter",
         projectCount: planSnapshot?.projectCount ?? 1,
         memberCount: planSnapshot?.memberCount ?? 1,
         activeProjectStatus: project.status,
       },
-      workflow,
+      workflow: workflowStages,
+
       metrics: [
         {
           label: "Trace backlog",

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/workers/**/*.ts",
+    "src/lib/**/*.ts",
+    "src/types/**/*.d.ts",
+    "prisma/**/*.d.mts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "node_modules"
+  ]
+}

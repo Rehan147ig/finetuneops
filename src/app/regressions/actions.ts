@@ -143,5 +143,5 @@ export async function applyRecoveryAction(
 
   revalidatePath(`/regressions/${report.regressionAlertId}`);
 
-  return successResult("One-Click Recovery queued.", "Recovery started");
+  return successResult("One-Click Dataset Cleanup queued.", "Recovery started");
 }

@@ -20,6 +20,10 @@ vi.mock("@/lib/audit", () => ({
 
 import { POST } from "./route";
 
+const request = new Request("http://localhost/api/settings/slack/test", {
+  method: "POST",
+});
+
 describe("slack test route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -34,7 +38,7 @@ describe("slack test route", () => {
       },
     });
 
-    const response = await POST();
+    const response = await POST(request);
     const body = await response.json();
 
     expect(response.status).toBe(403);
@@ -54,7 +58,7 @@ describe("slack test route", () => {
       error: "Slack is not connected for this workspace.",
     });
 
-    const response = await POST();
+    const response = await POST(request);
     expect(response.status).toBe(400);
   });
 
@@ -70,7 +74,7 @@ describe("slack test route", () => {
     });
     testSlackIntegration.mockResolvedValue({ ok: true });
 
-    const response = await POST();
+    const response = await POST(request);
     const body = await response.json();
 
     expect(response.status).toBe(200);

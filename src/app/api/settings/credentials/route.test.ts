@@ -37,6 +37,8 @@ vi.mock("@/lib/audit", () => ({
 
 import { GET, POST } from "./route";
 
+const getRequest = new Request("http://localhost/api/settings/credentials");
+
 describe("credentials route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,7 +58,7 @@ describe("credentials route", () => {
   it("rejects unauthenticated requests", async () => {
     auth.mockResolvedValue(null);
 
-    const response = await GET();
+    const response = await GET(getRequest);
     expect(response.status).toBe(401);
   });
 
@@ -69,7 +71,7 @@ describe("credentials route", () => {
       },
     });
 
-    const response = await GET();
+    const response = await GET(getRequest);
     const body = await response.json();
 
     expect(response.status).toBe(403);
@@ -96,7 +98,7 @@ describe("credentials route", () => {
       },
     ]);
 
-    const response = await GET();
+    const response = await GET(getRequest);
     const body = await response.json();
 
     expect(response.status).toBe(200);

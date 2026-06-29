@@ -15,7 +15,7 @@ const validEnv = {
   RESEND_API_KEY: "re_example",
   REDIS_URL: "redis://localhost:6379",
   ENCRYPTION_KEY: "12345678901234567890123456789012",
-} as NodeJS.ProcessEnv;
+} as unknown as NodeJS.ProcessEnv;
 
 describe("validateServerEnv", () => {
   it("throws a human-readable error when a required variable is missing", () => {

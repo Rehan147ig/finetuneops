@@ -7,9 +7,10 @@
   ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && npm run worker:build",
     "start": "next start",
-    "worker:dev": "npx ts-node src/workers/index.ts",
+    "worker:build": "npx esbuild src/workers/index.ts --bundle --platform=node --target=node20 --format=cjs --packages=external --outfile=dist/workers/index.js",
+    "worker:dev": "npm run worker:build && node dist/workers/index.js",
     "worker:start": "node dist/workers/index.js",
     "docker:dev": "docker-compose up",
     "docker:prod": "docker-compose -f docker-compose.yml -f docker-compose.production.yml up -d",

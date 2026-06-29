@@ -15,6 +15,8 @@ vi.mock("@/lib/queue-monitor", () => ({
 
 import { GET } from "./route";
 
+const request = new Request("http://localhost/api/admin/queues");
+
 describe("GET /api/admin/queues", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,7 +38,7 @@ describe("GET /api/admin/queues", () => {
       },
     ]);
 
-    const response = await GET();
+    const response = await GET(request);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -60,7 +62,7 @@ describe("GET /api/admin/queues", () => {
       },
     ]);
 
-    const response = await GET();
+    const response = await GET(request);
     const body = await response.json();
 
     expect(body.anyWarning).toBe(true);
@@ -83,7 +85,7 @@ describe("GET /api/admin/queues", () => {
       },
     ]);
 
-    const response = await GET();
+    const response = await GET(request);
     const body = await response.json();
 
     expect(body.anyWarning).toBe(true);
@@ -93,7 +95,7 @@ describe("GET /api/admin/queues", () => {
   it("requires authenticated session", async () => {
     auth.mockResolvedValue(null);
 
-    const response = await GET();
+    const response = await GET(request);
     const body = await response.json();
 
     expect(response.status).toBe(401);
