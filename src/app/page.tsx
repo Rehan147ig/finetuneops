@@ -8,7 +8,6 @@ import {
   formatPercent,
   formatSigned,
 } from "@/lib/format";
-import { milestones, reliabilityNotes } from "@/lib/mock-data";
 import { buildWorkspaceNudges } from "@/lib/nudge-engine";
 import { requireAuthSession } from "@/lib/auth-session";
 import { getWorkspaceData } from "@/lib/workspace-data";
@@ -336,22 +335,6 @@ await ops.trace({
           </SectionCard>
 
           <SectionCard
-            title="Reliability notes"
-            description="The product wins when it prevents wasted GPU time."
-            action="High leverage"
-          >
-            <div className="mini-grid">
-              {reliabilityNotes.map((note) => (
-                <article key={note} className="panel mini-card">
-                  <p className="muted">{note}</p>
-                </article>
-              ))}
-            </div>
-          </SectionCard>
-        </div>
-
-        <div className="page-grid two-column">
-          <SectionCard
             title="Fine-tune queue"
             description="Spend GPU hours only after the data and experiments justify it."
             action={`${jobs.length} jobs`}
@@ -437,17 +420,7 @@ await ops.trace({
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="Roadmap focus"
-          description="What turns this strong foundation into a paid beta customers can trust."
-          action={`${milestones.length} milestones`}
-        >
-          <ol className="checklist">
-            {milestones.map((milestone) => (
-              <li key={milestone}>{milestone}</li>
-            ))}
-          </ol>
-        </SectionCard>
+
       </div>
 
       <aside className="timeline-sidebar">

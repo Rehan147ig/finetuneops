@@ -247,6 +247,8 @@ npm run sdk:build
 
 ## Deployment Notes
 
+See [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md) for the private-beta launch checklist covering the live URL, Postgres, Redis, worker service, secrets, smoke tests, and GitHub release path.
+
 For Railway:
 
 - Set `DATABASE_URL`.

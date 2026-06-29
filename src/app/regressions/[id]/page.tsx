@@ -161,10 +161,10 @@ export default async function RegressionDetailPage({
             
             <p className="eyebrow mb-2">Top Suspicious Examples ({alert.traReport.suspiciousExamples.length})</p>
             <p className="muted mb-4" style={{ fontSize: "0.8em", opacity: 0.85 }}>
-              TRA does not scan every row exhaustively. Label-noise detection samples up to 40 rows,
-              instruction-conflict detection runs in batches of 8, duplicate and class-imbalance are
-              statistical, and only the top 10 ranked examples are shown. For large datasets this is
-              a sample, not a full audit.
+              TRA does not scan every row exhaustively. Label-noise detection samples up to 200 rows,
+              instruction-conflict detection runs in batches of 8, duplicate detection is O(N·K)
+              optimized but capped above 10,000 rows, and class-imbalance is statistical. Only the top
+              10 ranked examples are shown. For large datasets this is a sample, not a full audit.
             </p>
             <table className="table">
               <thead>

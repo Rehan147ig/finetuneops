@@ -37,6 +37,10 @@ vi.mock("@/lib/audit", () => ({
 
 import { DELETE, POST } from "./route";
 
+const deleteRequest = new Request("http://localhost/api/settings/slack", {
+  method: "DELETE",
+});
+
 describe("slack route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,7 +66,7 @@ describe("slack route", () => {
       },
     });
 
-    const response = await DELETE();
+    const response = await DELETE(deleteRequest);
     const body = await response.json();
 
     expect(response.status).toBe(403);
@@ -152,7 +156,7 @@ describe("slack route", () => {
       },
     });
 
-    const response = await DELETE();
+    const response = await DELETE(deleteRequest);
     const body = await response.json();
 
     expect(response.status).toBe(200);

@@ -97,14 +97,25 @@ describe("auto-eval-engine", () => {
       vi.mocked(getActiveCredential).mockResolvedValue("test_key");
       vi.mocked(prisma.evalRun.create).mockResolvedValue({ id: "eval_1" } as any);
 
-      // Each example triggers: (1) model call, (2) LLM-judge call
-      // ex_1: model returns exact match → exact=1.0, jaccard=1.0; judge scores 10/10
-      // ex_2: model returns "partial mismatch here" → exact=0.0, jaccard~partial; judge scores 5/10
-      mockOpenAiCreate
-        .mockResolvedValueOnce({ choices: [{ message: { content: "exact match" } }] })         // ex_1 model
-        .mockResolvedValueOnce({ choices: [{ message: { content: '{"score": 10}' } }] })       // ex_1 judge
-        .mockResolvedValueOnce({ choices: [{ message: { content: "partial mismatch here" } }] }) // ex_2 model
-        .mockResolvedValueOnce({ choices: [{ message: { content: '{"score": 5}' } }] });       // ex_2 judge
+      // Content-based mock (order-independent, so concurrency in runAutoEval
+      // does not affect results). The model call echoes a deterministic output;
+      // the judge call reads the "Expected/Actual" payload and returns a fixed
+      // score. ex_1 is an exact match (judge 10/10); ex_2 is a mismatch (5/10).
+      mockOpenAiCreate.mockImplementation(async (args: any) => {
+        const userContent: string = args?.messages?.find?.((m: any) => m.role === "user")?.content ?? "";
+        // Judge call: payload contains "Expected:" and "Actual:".
+        if (userContent.includes("Expected:")) {
+          if (userContent.includes("partial")) {
+            return { choices: [{ message: { content: '{"score": 5}' } }] };
+          }
+          return { choices: [{ message: { content: '{"score": 10}' } }] };
+        }
+        // Model call: inputText for ex_1 is "in1", for ex_2 is "in2".
+        if (userContent === "in1") {
+          return { choices: [{ message: { content: "exact match" } }] };
+        }
+        return { choices: [{ message: { content: "partial mismatch here" } }] };
+      });
 
       const result = await runAutoEval(input);
 

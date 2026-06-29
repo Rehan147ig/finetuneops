@@ -75,6 +75,33 @@ describe("quality engine", () => {
     expect(result.detected).toBe(0);
   });
 
+  it("detects named entities (person, place, organization) via NLP", () => {
+    // Regression test for the NER-based PII upgrade. Regex alone cannot catch
+    // these — the compromise NLP model is required for GDPR/EU AI Act coverage.
+    const result = checkPiiDetection([
+      {
+        id: "1",
+        input: "Please reach out to Sarah Johnson about the billing issue.",
+        output: "Forwarded the ticket to Sarah for review.",
+      },
+      {
+        id: "2",
+        input: "Ship the replacement to 123 Main Street, Springfield.",
+        output: "Address confirmed as Springfield.",
+      },
+      {
+        id: "3",
+        input: "Our partner Acme Corp needs the compliance report.",
+        output: "Sent the report to Acme Corp.",
+      },
+    ]);
+
+    expect(result.categories.person).toBeGreaterThanOrEqual(1);
+    expect(result.categories.place).toBeGreaterThanOrEqual(1);
+    expect(result.categories.organization).toBeGreaterThanOrEqual(1);
+    expect(result.flagged.length).toBe(3);
+  });
+
   it("flags empty outputs", () => {
     const result = checkEmptyOutputs([
       { id: "1", input: "Hello", output: "" },
@@ -94,7 +121,7 @@ describe("quality engine", () => {
       },
       pii: {
         detected: 2,
-        categories: { email: 1, phone: 1, ssn: 0, credit_card: 0 },
+        categories: { email: 1, phone: 1, ssn: 0, credit_card: 0, person: 0, organization: 0, place: 0 },
         flagged: [],
       },
       length: {
@@ -125,7 +152,7 @@ describe("quality engine", () => {
       },
       pii: {
         detected: 999,
-        categories: { email: 0, phone: 0, ssn: 0, credit_card: 0 },
+        categories: { email: 0, phone: 0, ssn: 0, credit_card: 0, person: 0, organization: 0, place: 0 },
         flagged: [],
       },
       length: {

@@ -99,15 +99,11 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
   });
 
   const openai = new OpenAI({ apiKey, timeout: 15_000 });
-  let exactMatchCount = 0;
-  let totalJaccard = 0;
-  let totalLlmScore = 0;
-  let llmScoredCount = 0;
-  let successfulSamples = 0;
+  type DatasetExample = (typeof dataset.examples)[number];
+  type EvaluatableExample = DatasetExample & { outputText: string };
+  type SampleResult = { exactMatch: boolean; jaccard: number; llmScore: number | null };
 
-  for (const example of dataset.examples) {
-    if (!example.outputText) continue;
-
+  const evaluateSample = async (example: EvaluatableExample): Promise<SampleResult | null> => {
     try {
       const completion = await openai.chat.completions.create({
         model: input.modelId,
@@ -118,15 +114,8 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
 
       const actualOutput = completion.choices[0]?.message?.content ?? "";
       const expectedOutput = example.outputText;
+      let llmScore: number | null = null;
 
-      if (actualOutput.trim() === expectedOutput.trim()) {
-        exactMatchCount++;
-      }
-      totalJaccard += jaccardSimilarity(actualOutput, expectedOutput);
-
-      // LLM-as-judge: use gpt-4o-mini to assess semantic correctness.
-      // This is far more accurate than n-gram overlap for generative tasks.
-      // Uses the customer's own API key (Rule 2 compliant).
       try {
         const judgeResponse = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -146,14 +135,16 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
         });
         const judgeContent = judgeResponse.choices[0]?.message?.content ?? "{}";
         const judgeResult = JSON.parse(judgeContent) as { score?: number };
-        const llmScore = Math.min(10, Math.max(0, Number(judgeResult.score ?? 0))) / 10;
-        totalLlmScore += llmScore;
-        llmScoredCount++;
+        llmScore = Math.min(10, Math.max(0, Number(judgeResult.score ?? 0))) / 10;
       } catch {
-        // LLM judge failed for this sample — fall back to Jaccard only
+        // LLM judge failed for this sample; fall back to Jaccard only.
       }
 
-      successfulSamples++;
+      return {
+        exactMatch: actualOutput.trim() === expectedOutput.trim(),
+        jaccard: jaccardSimilarity(actualOutput, expectedOutput),
+        llmScore,
+      };
     } catch (error) {
       logger.warn({
         event: "auto_eval_sample_failed",
@@ -161,8 +152,40 @@ export async function runAutoEval(input: AutoEvalInput): Promise<AutoEvalResult>
         modelId: input.modelId,
         error: error instanceof Error ? error.message : "unknown",
       });
+      return null;
+    }
+  };
+
+  // Concurrency is kept low to avoid triggering 429s from the customer's key.
+  const CONCURRENCY = 5;
+  const hasExpectedOutput = (example: DatasetExample): example is EvaluatableExample =>
+    typeof example.outputText === "string" && example.outputText.length > 0;
+  const candidates = dataset.examples.filter(hasExpectedOutput);
+  const sampleResults: SampleResult[] = [];
+
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    const settled = await Promise.allSettled(batch.map((ex) => evaluateSample(ex)));
+    for (const result of settled) {
+      if (result.status === "fulfilled" && result.value !== null) {
+        sampleResults.push(result.value);
+      }
     }
   }
+
+  let exactMatchCount = 0;
+  let totalJaccard = 0;
+  let totalLlmScore = 0;
+  let llmScoredCount = 0;
+  for (const r of sampleResults) {
+    if (r.exactMatch) exactMatchCount++;
+    totalJaccard += r.jaccard;
+    if (r.llmScore !== null) {
+      totalLlmScore += r.llmScore;
+      llmScoredCount++;
+    }
+  }
+  const successfulSamples = sampleResults.length;
 
   if (successfulSamples === 0) {
     const errorMsg = "All evaluation samples failed.";

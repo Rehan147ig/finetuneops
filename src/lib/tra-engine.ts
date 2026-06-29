@@ -210,58 +210,68 @@ async function judgeExamples(input: {
   }
 
   const batches = chunk(input.examples, BATCH_SIZE);
-  const settled = await Promise.allSettled(
-    batches.map(async (batch) => {
-      const response = await input.client?.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0,
-        response_format: {
-          type: "json_object",
-        },
-        messages: [
-          {
-            role: "system",
-            content: input.systemPrompt,
-          },
-          {
-            role: "user",
-            content: [
-              input.userPrompt,
-              "Return only JSON in this shape:",
-              '{"suspicious":[{"id":"example_id","confidence":0.0,"reason":"short reason","impactScore":0.0}]}',
-              JSON.stringify({
-                examples: batch.map((example) => ({
-                  id: example.id,
-                  input: example.inputText,
-                  output: example.outputText ?? "",
-                })),
-              }),
-            ].join("\n\n"),
-          },
-        ],
-      });
+  const results: TraSuspiciousExample[] = [];
+  
+  // CONCURRENCY OPTIMIZATION: Process a maximum of 4 batches in parallel
+  // to avoid triggering 429 Rate Limits from OpenAI, while staying fast.
+  const CONCURRENCY = 4;
+  const batchChunks = chunk(batches, CONCURRENCY);
 
-      return parseJudgeResponse(
-        response?.choices?.[0]?.message?.content,
-        input.category,
-        input.exampleIndexById,
-        input.exampleById,
-      );
-    }),
-  );
+  for (const batchChunk of batchChunks) {
+    const settled = await Promise.allSettled(
+      batchChunk.map(async (batch) => {
+        const response = await input.client?.chat.completions.create({
+          model: "gpt-4o-mini",
+          temperature: 0,
+          response_format: {
+            type: "json_object",
+          },
+          messages: [
+            {
+              role: "system",
+              content: input.systemPrompt,
+            },
+            {
+              role: "user",
+              content: [
+                input.userPrompt,
+                "Return only JSON in this shape:",
+                '{"suspicious":[{"id":"example_id","confidence":0.0,"reason":"short reason","impactScore":0.0}]}',
+                JSON.stringify({
+                  examples: batch.map((example) => ({
+                    id: example.id,
+                    input: example.inputText,
+                    output: example.outputText ?? "",
+                  })),
+                }),
+              ].join("\n\n"),
+            },
+          ],
+        });
 
-  return settled.flatMap((result) => {
-    if (result.status === "fulfilled") {
-      return result.value;
+        return parseJudgeResponse(
+          response?.choices?.[0]?.message?.content,
+          input.category,
+          input.exampleIndexById,
+          input.exampleById,
+        );
+      })
+    );
+
+    for (const result of settled) {
+      if (result.status === "fulfilled") {
+        results.push(...result.value);
+      } else {
+        logger.warn({
+          event: "tra_judge_batch_failed",
+          category: input.category,
+          error: result.reason instanceof Error ? result.reason.message : "unknown",
+        });
+      }
     }
+  }
 
-    logger.warn({
-      event: "tra_judge_batch_failed",
-      category: input.category,
-      error: result.reason instanceof Error ? result.reason.message : "unknown",
-    });
-    return [];
-  });
+  return results;
 }
 
 export async function instructionConflictDetection(
@@ -310,72 +320,74 @@ export function duplicateConflictFinder(examples: TraDatasetExample[]): {
   sampled: boolean;
 } {
   const suspicious: TraSuspiciousExample[] = [];
+  const SIMILARITY_THRESHOLD = 0.72;
 
-  // Cap O(n²) scan at DUPLICATE_SCAN_CAP rows to prevent OOM on large datasets.
-  const sampled = examples.length > DUPLICATE_SCAN_CAP;
-  const scanSet = sampled
-    ? examples.slice(0, DUPLICATE_SCAN_CAP)
-    : examples;
+  // With the new O(N*K) optimization, we can safely increase the cap.
+  const INCREASED_SCAN_CAP = 10_000;
+  const sampled = examples.length > INCREASED_SCAN_CAP;
+  const scanSet = sampled ? examples.slice(0, INCREASED_SCAN_CAP) : examples;
 
-  const processed = scanSet.map(ex => ({
+  const processed = scanSet.map((ex, originalIndex) => ({
     id: ex.id,
+    originalIndex,
     inputText: ex.inputText,
     tokens: new Set(normalizeTokens(ex.inputText)),
     output: normalizedOutput(ex.outputText),
   }));
+
+  // ALGORITHM OPTIMIZATION: Sort by token size ascending.
+  // This allows the inner loop to break early because if the left string is 
+  // vastly shorter than the right string, Jaccard similarity cannot exceed the threshold.
+  processed.sort((a, b) => a.tokens.size - b.tokens.size);
 
   for (let leftIndex = 0; leftIndex < processed.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < processed.length; rightIndex += 1) {
       const left = processed[leftIndex];
       const right = processed[rightIndex];
 
+      // Early Break: If the difference in size makes similarity mathematically impossible,
+      // we can break the inner loop entirely because the rest of the array is even larger!
+      if (left.tokens.size / Math.max(1, right.tokens.size) < SIMILARITY_THRESHOLD) {
+        break; 
+      }
+
       if (!left.output || !right.output || left.output === right.output) {
         continue;
       }
 
-      const minSize = Math.min(left.tokens.size, right.tokens.size);
-      const maxSize = Math.max(left.tokens.size, right.tokens.size);
-
-      if (maxSize > 0 && (minSize / maxSize) < 0.72) {
-        continue;
-      }
-
       let intersectionSize = 0;
-      const smallestSet = left.tokens.size < right.tokens.size ? left.tokens : right.tokens;
-      const largestSet = left.tokens.size < right.tokens.size ? right.tokens : left.tokens;
-      for (const token of smallestSet) {
-        if (largestSet.has(token)) intersectionSize++;
+      for (const token of left.tokens) {
+        if (right.tokens.has(token)) intersectionSize++;
       }
 
       const unionSize = left.tokens.size + right.tokens.size - intersectionSize;
       const similarity = unionSize === 0 ? 0 : intersectionSize / unionSize;
 
-      if (similarity < 0.72) {
+      if (similarity < SIMILARITY_THRESHOLD) {
         continue;
       }
 
       const confidence = clamp01(0.65 + similarity * 0.25);
-      const reason = `Near-duplicate input conflicts with example ${rightIndex + 1}; outputs disagree.`;
-
+      
       suspicious.push({
         exampleId: left.id,
-        exampleIndex: leftIndex,
+        exampleIndex: left.originalIndex,
         confidence,
-        reason,
+        reason: `Near-duplicate input conflicts with example ${right.originalIndex + 1}; outputs disagree.`,
         category: "duplicate_conflict",
         impactScore: clamp01(confidence + 0.05),
         inputPreview: preview(left.inputText),
-        outputPreview: preview(examples[leftIndex].outputText),
+        outputPreview: preview(examples[left.originalIndex].outputText),
       });
       suspicious.push({
         exampleId: right.id,
-        exampleIndex: rightIndex,
+        exampleIndex: right.originalIndex,
         confidence,
-        reason: `Near-duplicate input conflicts with example ${leftIndex + 1}; outputs disagree.`,
+        reason: `Near-duplicate input conflicts with example ${left.originalIndex + 1}; outputs disagree.`,
         category: "duplicate_conflict",
         impactScore: clamp01(confidence + 0.05),
         inputPreview: preview(right.inputText),
-        outputPreview: preview(examples[rightIndex].outputText),
+        outputPreview: preview(examples[right.originalIndex].outputText),
       });
     }
   }
@@ -511,9 +523,12 @@ function categoryLabel(category: TraCategory | "unknown") {
 
 export async function runTraAnalysis(
   input: TraAnalysisInput,
-  customerApiKey?: string | null,
+  customerApiKeyOrClient?: string | OpenAiLike | null,
 ): Promise<TraAnalysisResult> {
-  const client = createOpenAiClient(customerApiKey ?? undefined);
+  const client =
+    typeof customerApiKeyOrClient === "object" && customerApiKeyOrClient
+      ? customerApiKeyOrClient
+      : createOpenAiClient(customerApiKeyOrClient ?? undefined);
   const limitedMode = !client;
   const totalExamples = input.examples.length;
   const labelNoiseSampleSize = Math.min(LABEL_NOISE_SAMPLE_SIZE, totalExamples);

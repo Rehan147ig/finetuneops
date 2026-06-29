@@ -2,7 +2,6 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { findActiveInviteByToken } from "@/lib/invitations";
 import type { WorkspaceRole } from "@/lib/authz";
-// @ts-expect-error Shared with the seed script; typed locally in onboarding usage.
 import { buildDemoWorkspaceSeed } from "../../prisma/demo-workspace.mjs";
 
 function slugify(value: string) {
@@ -33,22 +32,14 @@ async function seedDemoProject(
   });
 
   await tx.traceEvent.createMany({
-    data: demo.traceEvents.map((trace: Record<string, unknown>) => ({
+    data: demo.traceEvents.map((trace) => ({
       projectId: project.id,
       ...trace,
     })),
   });
 
   const datasets: Array<{ id: string; status: string }> = [];
-  for (const dataset of demo.datasets as Record<string, unknown>[]) {
-    const seededDataset = dataset as {
-      name: string;
-      version: string;
-      source?: string;
-      status: string;
-      rowCount: number;
-      qualityScore: number;
-    };
+  for (const seededDataset of demo.datasets) {
     datasets.push(
       await tx.dataset.create({
         data: {
@@ -65,16 +56,7 @@ async function seedDemoProject(
   }
 
   const experiments: Array<{ id: string; status: string }> = [];
-  for (const [index, experiment] of (demo.experiments as Record<string, unknown>[]).entries()) {
-    const seededExperiment = experiment as {
-      name: string;
-      goal: string;
-      candidateModel: string;
-      promptVersion: string;
-      status: string;
-      score: number;
-      costEstimate: number;
-    };
+  for (const [index, seededExperiment] of demo.experiments.entries()) {
     experiments.push(
       await tx.experimentRun.create({
         data: {
@@ -95,18 +77,7 @@ async function seedDemoProject(
   const completedExperiment =
     experiments.find((experiment) => experiment.status === "promote") ?? experiments[0];
 
-  const seededTrainingJob = demo.trainingJobs[0] as {
-    name: string;
-    modelBase: string;
-    provider: string;
-    status: string;
-    progress: number;
-    gpuType: string;
-    gpuHours: number;
-    checkpoint: string;
-    startedAt?: Date;
-    finishedAt?: Date;
-  };
+  const seededTrainingJob = demo.trainingJobs[0];
   const completedJob = await tx.trainingJob.create({
     data: {
       projectId: project.id,
@@ -126,16 +97,7 @@ async function seedDemoProject(
   });
 
   await tx.evalRun.createMany({
-    data: (demo.evalRuns as Record<string, unknown>[]).map((evalRun, index) => {
-      const seededEval = evalRun as {
-        name: string;
-        benchmark: string;
-        status: string;
-        score: number;
-        delta: number;
-        judge: string;
-      };
-
+    data: demo.evalRuns.map((seededEval, index) => {
       return {
         projectId: project.id,
         datasetId: datasets[index]?.id ?? datasets[0].id,
@@ -173,13 +135,13 @@ async function seedDemoProject(
   });
 
   await tx.activityLog.createMany({
-    data: (demo.activityLogs as Record<string, unknown>[]).map((entry) => ({
+    data: demo.activityLogs.map((entry) => ({
       projectId: project.id,
       userId,
-      type: entry.type as string,
-      message: entry.message as string,
-      metadata: JSON.stringify((entry.metadata as Record<string, unknown>) ?? {}),
-      timestamp: entry.timestamp as Date,
+      type: entry.type,
+      message: entry.message,
+      metadata: JSON.stringify(entry.metadata ?? {}),
+      timestamp: entry.timestamp,
     })),
   });
 
