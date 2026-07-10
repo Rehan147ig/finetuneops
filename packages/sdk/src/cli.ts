@@ -6,6 +6,7 @@ import {
   type EvalCase,
   type TrainingExample,
 } from "./regression-report";
+import { importLangSmithRuns, type LangSmithRun } from "./langsmith-import";
 
 type CliOptions = {
   baseline?: string;
@@ -15,6 +16,8 @@ type CliOptions = {
   output?: string;
   minDrop?: number;
   failOnRegression: boolean;
+  input?: string;
+  scoreKey?: string;
 };
 
 function printHelp() {
@@ -22,6 +25,7 @@ function printHelp() {
 
 Usage:
   finetuneops regression --baseline baseline.jsonl --candidate candidate.jsonl [--training train.jsonl]
+  finetuneops import-langsmith --input langsmith-runs.json --output eval-cases.jsonl [--score-key correctness]
 
 Options:
   --baseline <file>       Baseline eval cases as JSON array or JSONL
@@ -31,6 +35,8 @@ Options:
   --output <file>         Write report to a file
   --min-drop <number>     Minimum per-case/global score drop (default: 0.05)
   --fail-on-regression    Exit with code 2 when a regression is detected
+  --input <file>          LangSmith run export as a JSON array or JSONL
+  --score-key <key>       Feedback metric to use as the eval score
   --help                  Show this help
 `);
 }
@@ -57,6 +63,14 @@ function parseArgs(argv: string[]): { command?: string; options: CliOptions } {
         break;
       case "--training":
         options.training = next;
+        index += 1;
+        break;
+      case "--input":
+        options.input = next;
+        index += 1;
+        break;
+      case "--score-key":
+        options.scoreKey = next;
         index += 1;
         break;
       case "--format":
@@ -139,11 +153,27 @@ function runRegression(options: CliOptions) {
   }
 }
 
+function runLangSmithImport(options: CliOptions) {
+  if (!options.input || !options.output) {
+    throw new Error("Both --input and --output are required for import-langsmith.");
+  }
+
+  const cases = importLangSmithRuns(parseDataFile<LangSmithRun>(options.input), {
+    scoreKey: options.scoreKey,
+  });
+  writeFileSync(options.output, `${cases.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
+}
+
 export function runCli(argv = process.argv.slice(2)) {
   const { command, options } = parseArgs(argv);
 
   if (!command || command === "--help" || command === "-h") {
     printHelp();
+    return;
+  }
+
+  if (command === "import-langsmith") {
+    runLangSmithImport(options);
     return;
   }
 

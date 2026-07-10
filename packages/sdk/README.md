@@ -33,6 +33,18 @@ The report highlights global score drop, highest-impact failed cases,
 model/prompt/RAG version changes, and optional training-data risks such as PII
 or duplicate conflicts.
 
+## Import LangSmith runs
+
+Export filtered LangSmith baseline and candidate runs, then convert them into
+FineTuneOps eval cases. Keep stable ids and release metadata on both exports so
+the RCA report can compare them.
+
+```bash
+npx finetuneops import-langsmith --input baseline-runs.json --output baseline.jsonl --score-key correctness
+npx finetuneops import-langsmith --input candidate-runs.json --output candidate.jsonl --score-key correctness
+npx finetuneops regression --baseline baseline.jsonl --candidate candidate.jsonl --fail-on-regression
+```
+
 ## Regression report SDK
 
 ```ts

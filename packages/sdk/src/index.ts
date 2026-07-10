@@ -5,6 +5,7 @@ export {
   analyzeRegressionReport,
   renderRegressionReportMarkdown,
 } from "./regression-report";
+export { importLangSmithRuns } from "./langsmith-import";
 export type { FinetuneOpsConfig, TraceInput, TraceResult, SDKError } from "./types";
 export type {
   ChangeFinding,
@@ -15,3 +16,4 @@ export type {
   RegressionReportInput,
   TrainingExample,
 } from "./regression-report";
+export type { LangSmithImportOptions, LangSmithRun } from "./langsmith-import";
