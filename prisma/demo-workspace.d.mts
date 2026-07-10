@@ -119,6 +119,7 @@ export function buildDemoWorkspaceSeed(input?: {
       summary: string;
       recommendedAction: string;
       estimatedRecovery: number;
+      impactRating: string;
       suspiciousExamples: DemoSuspiciousExample[];
     };
   };

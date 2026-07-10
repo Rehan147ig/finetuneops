@@ -15,7 +15,7 @@ import { getWorkspaceData } from "@/lib/workspace-data";
 const workflowNodes = [
   {
     title: "Capture",
-    detail: "Log real production failures from your app or SDK.",
+    detail: "Log production failures or import eval outputs from your pipeline.",
   },
   {
     title: "Curate",
@@ -23,11 +23,15 @@ const workflowNodes = [
   },
   {
     title: "Evaluate",
-    detail: "Compare prompts, models, latency, cost, and quality.",
+    detail: "Compare baseline and candidate quality, latency, cost, and policy scores.",
   },
   {
-    title: "Train",
-    detail: "Launch fine-tunes only when data proves it is worth it.",
+    title: "Explain",
+    detail: "Find the prompt, model, retrieval, eval, or training-data change behind the drop.",
+  },
+  {
+    title: "Recover",
+    detail: "Clean suspicious fine-tune rows or roll back risky release changes.",
   },
   {
     title: "Release",
@@ -68,17 +72,16 @@ export default async function HomePage() {
           <div className="hero-copy">
             <div>
               <p className="eyebrow">{workspaceName}</p>
-              <h2>Turn messy LLM behavior into production-grade releases.</h2>
+              <h2>Explain why an LLM release got worse before it ships.</h2>
             </div>
             <p className="muted">
-              FinetuneOps gives AI teams the operating system for improvement:
-              capture failures, build datasets, version prompts, evaluate
-              candidates, launch fine-tunes, and prove every release is safer
-              before it reaches users.
+              FineTuneOps turns eval drops into root-cause evidence across prompts,
+              model upgrades, RAG changes, and fine-tune datasets. Use the dashboard
+              for investigation, or run the CLI as a release gate in CI.
             </p>
             <div className="hero-actions">
-              <Link className="primary-button" href="/traces">
-                Start capturing traces
+              <Link className="primary-button" href="/regressions">
+                Review regressions
               </Link>
               <Link className="secondary-button" href="/docs">
                 Read launch docs
@@ -113,10 +116,10 @@ await ops.trace({
             </article>
             <article className="panel mini-card">
               <p className="eyebrow">Promise</p>
-              <h3>Every failure becomes a reusable improvement asset.</h3>
+              <h3>Every regression becomes a reviewable release report.</h3>
               <p className="muted">
-                Your team stops guessing why quality changed and starts shipping
-                from evidence.
+                Your team stops guessing whether the prompt, model, retrieval layer,
+                eval, or training data caused the quality drop.
               </p>
             </article>
           </div>

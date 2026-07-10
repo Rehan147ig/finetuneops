@@ -7,7 +7,7 @@ export type DocPage = {
   slug: string[];
   title: string;
   description: string;
-  category: "Getting Started" | "Tracing" | "Datasets" | "Prompts" | "Releases" | "SDK";
+  category: "Getting Started" | "Regression RCA" | "Tracing" | "Datasets" | "Prompts" | "Releases" | "SDK";
   order: number;
   sections: DocSection[];
 };
@@ -16,15 +16,15 @@ export const docsPages: DocPage[] = [
   {
     slug: ["getting-started"],
     title: "Getting Started",
-    description: "Set up FineTuneOps for a team that ships prompts, datasets, and fine-tunes in production.",
+    description: "Set up FineTuneOps for a team that ships frontier model, prompt, RAG, and fine-tune releases.",
     category: "Getting Started",
     order: 1,
     sections: [
       {
         heading: "Why teams adopt FineTuneOps",
         body: [
-          "FineTuneOps is built around the operational loop that high-performing LLM teams repeat every week: trace failures, promote the best examples into datasets, compare fixes, fine-tune only when needed, and gate releases on quality, latency, and cost.",
-          "The product becomes valuable when it acts as shared memory. Teams stop guessing which prompt, dataset, or model is currently live because every production decision stays visible in one place.",
+          "FineTuneOps is built around one painful question: why did this LLM release get worse? It compares baseline and candidate evals, identifies likely release changes, and produces evidence that can block or approve promotion.",
+          "Fine-tune teams get the deepest workflow through TRA, which ranks suspicious training rows. Frontier-model teams can still use the same regression report for prompt, RAG, model, and eval changes.",
         ],
       },
       {
@@ -37,11 +37,34 @@ export const docsPages: DocPage[] = [
     ],
   },
   {
+    slug: ["regression-rca", "cli-release-gate"],
+    title: "CLI Release Gate",
+    description: "Generate a regression root-cause report from eval files without adopting the full dashboard first.",
+    category: "Regression RCA",
+    order: 2,
+    sections: [
+      {
+        heading: "Run the CLI in any eval pipeline",
+        body: [
+          "Use the SDK package as a command-line gate: finetuneops regression --baseline baseline.jsonl --candidate candidate.jsonl --training train.jsonl --format markdown --output report.md --fail-on-regression.",
+          "Baseline and candidate files can be JSON arrays or JSONL rows. Each row may include id, input, output, score, passed, metric, model, promptVersion, retrievalVersion, latency_ms, cost_usd, and metadata.",
+        ],
+      },
+      {
+        heading: "What the report explains",
+        body: [
+          "The report shows the global score drop, highest-impact failed eval cases, changed model, prompt, or retrieval versions, and optional training-data findings such as duplicate conflicts, PII leaks, and unusually long examples.",
+          "This makes FineTuneOps useful before a team has connected all traces, auth, billing, and workers. The CLI creates the adoption wedge; the dashboard becomes the evidence archive.",
+        ],
+      },
+    ],
+  },
+  {
     slug: ["traces", "capture-and-promote"],
     title: "Capture and Promote Traces",
     description: "Turn production failures into the training data that actually matters.",
     category: "Tracing",
-    order: 2,
+    order: 3,
     sections: [
       {
         heading: "Capture traces quickly",
@@ -64,7 +87,7 @@ export const docsPages: DocPage[] = [
     title: "Dataset Quality Engine",
     description: "Inspect duplicates, PII, length issues, and cost waste before launching training jobs.",
     category: "Datasets",
-    order: 3,
+    order: 4,
     sections: [
       {
         heading: "What gets scored",
@@ -86,7 +109,7 @@ export const docsPages: DocPage[] = [
     title: "Prompt Versioning",
     description: "Track exactly which prompt is live, compare revisions, and preview variables before deployment.",
     category: "Prompts",
-    order: 4,
+    order: 5,
     sections: [
       {
         heading: "Treat prompts like production assets",
@@ -108,7 +131,7 @@ export const docsPages: DocPage[] = [
     title: "Release Gates and Approvals",
     description: "Ship only when evals, latency, and cost all clear your gates.",
     category: "Releases",
-    order: 5,
+    order: 6,
     sections: [
       {
         heading: "Make release decisions visible",
@@ -124,12 +147,12 @@ export const docsPages: DocPage[] = [
     title: "SDK Overview",
     description: "Instrument traces automatically and fetch prompt templates directly from your application.",
     category: "SDK",
-    order: 6,
+    order: 7,
     sections: [
       {
         heading: "Use the SDK for fast adoption",
         body: [
-          "The FinetuneOps SDK can wrap OpenAI and Anthropic clients, batch trace capture, and fetch current prompt templates by name.",
+          "The FineTuneOps SDK can wrap OpenAI and Anthropic clients, batch trace capture, fetch current prompt templates by name, and generate local LLM regression reports.",
           "SDK prompt lookups are cached locally for five minutes so applications can reuse the live template without hammering the API on every request.",
         ],
       },

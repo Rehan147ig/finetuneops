@@ -370,6 +370,7 @@ export function buildDemoWorkspaceSeed({
         recommendedAction:
           "Remove the flagged conflicting duplicate, the refund/cancellation instruction conflict, and the PII example, then retrain on the cleaned dataset. Estimated recovery: 19.1 points, restoring accuracy to ~82.5.",
         estimatedRecovery: 19.1,
+        impactRating: "HIGH",
         suspiciousExamples: [
           {
             exampleIndex: 0,

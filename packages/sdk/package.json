@@ -4,6 +4,9 @@
   "description": "SDK for FinetuneOps LLM ops platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "finetuneops": "dist/cli.js"
+  },
   "files": ["dist"],
   "scripts": {
     "build": "tsc",
