@@ -21,6 +21,7 @@ export type LangSmithRun = {
 export type LangSmithImportOptions = {
   scoreKey?: string;
   includeRunTypes?: string[];
+  caseIdMetadataKey?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -91,6 +92,27 @@ function tagValue(tags: string[] | undefined, prefix: string): string | undefine
   return tags?.find((tag) => tag.startsWith(prefix))?.slice(prefix.length);
 }
 
+function caseIdFromMetadata(metadata: Record<string, unknown>, preferredKey?: string): string | undefined {
+  const keys = [
+    preferredKey,
+    "finetuneops_case_id",
+    "finetuneopsCaseId",
+    "eval_case_id",
+    "evalCaseId",
+    "example_id",
+    "exampleId",
+    "dataset_example_id",
+    "datasetExampleId",
+  ].filter((key): key is string => Boolean(key));
+
+  for (const key of keys) {
+    const value = textValue(metadata[key]);
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
 export function importLangSmithRuns(runs: LangSmithRun[], options: LangSmithImportOptions = {}): EvalCase[] {
   const includeRunTypes = new Set(options.includeRunTypes ?? ["llm", "chain"]);
 
@@ -100,9 +122,10 @@ export function importLangSmithRuns(runs: LangSmithRun[], options: LangSmithImpo
       const metadata = run.extra?.metadata ?? {};
       const invocation = run.extra?.invocation_params ?? {};
       const score = scoreFromFeedback(run, options.scoreKey);
+      const stableCaseId = caseIdFromMetadata(metadata, options.caseIdMetadataKey);
 
       return {
-        id: run.id ?? `langsmith-run-${index + 1}`,
+        id: stableCaseId ?? run.id ?? `langsmith-run-${index + 1}`,
         input: firstText(run.inputs),
         output: firstText(run.outputs),
         score,
@@ -114,6 +137,8 @@ export function importLangSmithRuns(runs: LangSmithRun[], options: LangSmithImpo
         latency_ms: latencyMs(run),
         metadata: {
           ...metadata,
+          finetuneopsCaseId: stableCaseId,
+          langsmithRunId: run.id,
           langsmithRunType: run.run_type,
           langsmithRunName: run.name,
           langsmithTags: run.tags,

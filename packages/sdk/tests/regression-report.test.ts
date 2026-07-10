@@ -98,4 +98,20 @@ describe("regression report", () => {
     expect(markdown).toContain("case-1");
     expect(markdown).toContain("Recommendation:");
   });
+
+  it("does not compare different explicit case ids by export position", () => {
+    const report = analyzeRegressionReport({
+      baseline: [{ id: "refund-policy", input: "Refund?", score: 1 }],
+      candidate: [{ id: "cancel-plan", input: "Cancel?", score: 0 }],
+    });
+
+    expect(report.summary).toMatchObject({
+      comparedCases: 0,
+      unmatchedBaselineCases: 1,
+      unmatchedCandidateCases: 1,
+      regressed: false,
+    });
+    expect(report.failedCases).toEqual([]);
+    expect(report.recommendation).toContain("finetuneops_case_id");
+  });
 });

@@ -62,6 +62,9 @@ export type RegressionReport = {
     drop: number;
     regressed: boolean;
     impactRating: "LOW" | "MEDIUM" | "HIGH";
+    comparedCases: number;
+    unmatchedBaselineCases: number;
+    unmatchedCandidateCases: number;
   };
   failedCases: FailedCaseFinding[];
   datasetFindings: DatasetFinding[];
@@ -103,6 +106,39 @@ function averageScore(items: EvalCase[]): number {
   if (items.length === 0) return 0;
   const total = items.reduce((sum, item) => sum + scoreOf(item), 0);
   return Number((total / items.length).toFixed(4));
+}
+
+type MatchedCase = {
+  id: string;
+  baseline: EvalCase;
+  candidate: EvalCase;
+};
+
+function matchEvalCases(baseline: EvalCase[], candidate: EvalCase[]) {
+  const candidateById = new Map(candidate.map((item, index) => [caseId(item, index), { item, index }]));
+  const matchedCandidateIndexes = new Set<number>();
+  const pairs: MatchedCase[] = [];
+  let unmatchedBaselineCases = 0;
+
+  baseline.forEach((base, index) => {
+    const id = caseId(base, index);
+    const match = candidateById.get(id);
+    const next = match ?? (!base.id ? { item: candidate[index], index } : undefined);
+
+    if (!next?.item) {
+      unmatchedBaselineCases += 1;
+      return;
+    }
+
+    matchedCandidateIndexes.add(next.index);
+    pairs.push({ id, baseline: base, candidate: next.item });
+  });
+
+  return {
+    pairs,
+    unmatchedBaselineCases,
+    unmatchedCandidateCases: candidate.filter((_, index) => !matchedCandidateIndexes.has(index)).length,
+  };
 }
 
 function normalizedTrainingText(example: TrainingExample): string {
@@ -173,16 +209,13 @@ function detectDatasetFindings(trainingData: TrainingExample[] = []): DatasetFin
   return findings;
 }
 
-function detectChangeFindings(baseline: EvalCase[], candidate: EvalCase[]): ChangeFinding[] {
+function detectChangeFindings(pairs: MatchedCase[]): ChangeFinding[] {
   const fields: Array<keyof EvalCase> = ["model", "promptVersion", "retrievalVersion"];
   const findings: ChangeFinding[] = [];
 
   fields.forEach((field) => {
-    const pairs = baseline
-      .map((base, index) => ({ base, candidate: candidate[index] }))
-      .filter(({ candidate: next }) => next);
-    const changed = pairs.filter(({ base, candidate: next }) => {
-      return stringifyValue(base[field]) !== stringifyValue(next[field]);
+    const changed = pairs.filter(({ baseline, candidate: next }) => {
+      return stringifyValue(baseline[field]) !== stringifyValue(next[field]);
     });
 
     if (changed.length === 0) return;
@@ -190,7 +223,7 @@ function detectChangeFindings(baseline: EvalCase[], candidate: EvalCase[]): Chan
     const first = changed[0];
     findings.push({
       field,
-      baselineValue: stringifyValue(first.base[field]) || "unset",
+      baselineValue: stringifyValue(first.baseline[field]) || "unset",
       candidateValue: stringifyValue(first.candidate[field]) || "unset",
       affectedCases: changed.length,
       reason: `${field} changed across ${changed.length} eval case(s), so this release should be reviewed as a possible regression source.`,
@@ -207,6 +240,10 @@ function impactRating(drop: number, failedCases: number, highRiskDatasetFindings
 }
 
 function buildRecommendation(report: Omit<RegressionReport, "recommendation">): string {
+  if (report.summary.comparedCases === 0) {
+    return "No matching eval cases were found. Set finetuneops_case_id in release metadata before comparing releases.";
+  }
+
   if (!report.summary.regressed) {
     return "No material regression detected. Keep the report as release evidence.";
   }
@@ -228,16 +265,13 @@ function buildRecommendation(report: Omit<RegressionReport, "recommendation">): 
 
 export function analyzeRegressionReport(input: RegressionReportInput): RegressionReport {
   const minDrop = input.minDrop ?? DEFAULT_MIN_DROP;
-  const baselineScore = averageScore(input.baseline);
-  const candidateScore = averageScore(input.candidate);
+  const matching = matchEvalCases(input.baseline, input.candidate);
+  const baselineScore = averageScore(matching.pairs.map((pair) => pair.baseline));
+  const candidateScore = averageScore(matching.pairs.map((pair) => pair.candidate));
   const drop = Number((baselineScore - candidateScore).toFixed(4));
-  const candidateById = new Map(input.candidate.map((item, index) => [caseId(item, index), item]));
 
-  const failedCases = input.baseline
-    .map((base, index): FailedCaseFinding | null => {
-      const id = caseId(base, index);
-      const next = candidateById.get(id) ?? input.candidate[index];
-      if (!next) return null;
+  const failedCases = matching.pairs
+    .map(({ id, baseline: base, candidate: next }): FailedCaseFinding | null => {
 
       const baselineCaseScore = scoreOf(base);
       const candidateCaseScore = scoreOf(next);
@@ -258,7 +292,7 @@ export function analyzeRegressionReport(input: RegressionReportInput): Regressio
     .sort((a, b) => b.drop - a.drop);
 
   const datasetFindings = detectDatasetFindings(input.trainingData);
-  const changeFindings = detectChangeFindings(input.baseline, input.candidate);
+  const changeFindings = detectChangeFindings(matching.pairs);
   const highRiskDatasetFindings = datasetFindings.filter((finding) => finding.severity === "HIGH").length;
 
   const reportWithoutRecommendation = {
@@ -267,8 +301,11 @@ export function analyzeRegressionReport(input: RegressionReportInput): Regressio
       baselineScore,
       candidateScore,
       drop,
-      regressed: drop >= minDrop,
+      regressed: matching.pairs.length > 0 && drop >= minDrop,
       impactRating: impactRating(drop, failedCases.length, highRiskDatasetFindings),
+      comparedCases: matching.pairs.length,
+      unmatchedBaselineCases: matching.unmatchedBaselineCases,
+      unmatchedCandidateCases: matching.unmatchedCandidateCases,
     },
     failedCases,
     datasetFindings,
@@ -290,6 +327,9 @@ export function renderRegressionReportMarkdown(report: RegressionReport): string
     `- Drop: ${report.summary.drop}`,
     `- Regressed: ${report.summary.regressed ? "yes" : "no"}`,
     `- Impact: ${report.summary.impactRating}`,
+    `- Matched eval cases: ${report.summary.comparedCases}`,
+    `- Unmatched baseline cases: ${report.summary.unmatchedBaselineCases}`,
+    `- Unmatched candidate cases: ${report.summary.unmatchedCandidateCases}`,
     "",
     `Recommendation: ${report.recommendation}`,
     "",

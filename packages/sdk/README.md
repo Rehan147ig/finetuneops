@@ -39,6 +39,11 @@ Export filtered LangSmith baseline and candidate runs, then convert them into
 FineTuneOps eval cases. Keep stable ids and release metadata on both exports so
 the RCA report can compare them.
 
+Set `finetuneops_case_id` in each run's LangSmith metadata to the durable id of
+the evaluation case. FineTuneOps will report unmatched cases instead of comparing
+unrelated runs by their export order. Use `--case-id-key` when your application
+uses another metadata field.
+
 ```bash
 npx finetuneops import-langsmith --input baseline-runs.json --output baseline.jsonl --score-key correctness
 npx finetuneops import-langsmith --input candidate-runs.json --output candidate.jsonl --score-key correctness

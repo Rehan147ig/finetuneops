@@ -18,6 +18,7 @@ type CliOptions = {
   failOnRegression: boolean;
   input?: string;
   scoreKey?: string;
+  caseIdKey?: string;
 };
 
 function printHelp() {
@@ -37,6 +38,7 @@ Options:
   --fail-on-regression    Exit with code 2 when a regression is detected
   --input <file>          LangSmith run export as a JSON array or JSONL
   --score-key <key>       Feedback metric to use as the eval score
+  --case-id-key <key>     Run metadata field used to match eval cases across releases
   --help                  Show this help
 `);
 }
@@ -71,6 +73,10 @@ function parseArgs(argv: string[]): { command?: string; options: CliOptions } {
         break;
       case "--score-key":
         options.scoreKey = next;
+        index += 1;
+        break;
+      case "--case-id-key":
+        options.caseIdKey = next;
         index += 1;
         break;
       case "--format":
@@ -160,6 +166,7 @@ function runLangSmithImport(options: CliOptions) {
 
   const cases = importLangSmithRuns(parseDataFile<LangSmithRun>(options.input), {
     scoreKey: options.scoreKey,
+    caseIdMetadataKey: options.caseIdKey,
   });
   writeFileSync(options.output, `${cases.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
 }

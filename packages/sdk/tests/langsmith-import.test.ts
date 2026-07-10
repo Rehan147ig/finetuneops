@@ -13,7 +13,7 @@ describe("LangSmith import", () => {
         start_time: "2026-07-10T10:00:00.000Z",
         end_time: "2026-07-10T10:00:01.250Z",
         extra: {
-          metadata: { prompt_version: "support-v2" },
+          metadata: { prompt_version: "support-v2", finetuneops_case_id: "cancel-plan" },
           invocation_params: { model: "gpt-4.1-mini" },
         },
         feedback_stats: { correctness: { score: 0.8 } },
@@ -23,13 +23,14 @@ describe("LangSmith import", () => {
 
     expect(cases).toEqual([
       expect.objectContaining({
-        id: "run-1",
+        id: "cancel-plan",
         input: "Can I cancel my plan?",
         output: "Yes, you can cancel from billing.",
         score: 0.8,
         model: "gpt-4.1-mini",
         promptVersion: "support-v2",
         latency_ms: 1250,
+        metadata: expect.objectContaining({ langsmithRunId: "run-1" }),
       }),
     ]);
   });
