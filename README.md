@@ -1,15 +1,45 @@
-# FinetuneOps
+# FineTuneOps
 
-FinetuneOps is a production SaaS for AI engineering teams that need to
-turn production LLM failures into better datasets, prompts, evals, fine-tunes,
-and releases.
+FineTuneOps is LLM regression root-cause analysis for AI engineering teams.
+It compares baseline and candidate evals, explains why quality dropped, and
+turns the evidence into a release gate, TRA report, or recovery workflow.
 
 It is not meant to be just another LLM observability dashboard. The product
 direction is sharper:
 
-> FinetuneOps should become the debugger that tells a team which training
-> examples, prompts, or eval regressions broke model quality, then helps fix
-> them in one click.
+> FineTuneOps should become the regression analyst for LLM releases: what
+> broke, why it broke, what changed, and what the team should fix first.
+
+It supports frontier-model apps and fine-tuned models:
+
+- Frontier model releases: prompt changes, model/provider upgrades, RAG changes,
+  eval drift, latency/cost regressions, and policy failures.
+- Fine-tune releases: everything above, plus TRA ranking for suspicious training
+  rows such as duplicate conflicts, label noise, instruction conflicts, PII
+  leaks, and imbalance.
+
+## Developer-First Adoption
+
+Teams should be able to try the core value before adopting the whole dashboard.
+The SDK now exposes a local regression report and CLI release gate:
+
+```bash
+npx finetuneops regression \
+  --baseline baseline.jsonl \
+  --candidate candidate.jsonl \
+  --training train.jsonl \
+  --format markdown \
+  --output finetuneops-report.md \
+  --fail-on-regression
+```
+
+The command accepts JSON arrays or JSONL rows and produces a report showing:
+
+- global baseline vs candidate score drop,
+- highest-impact failed eval cases,
+- changed model, prompt, or retrieval versions,
+- optional training-data findings,
+- a recommendation that can block CI.
 
 ## Current Product
 

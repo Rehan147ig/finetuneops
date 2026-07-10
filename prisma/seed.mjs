@@ -212,7 +212,7 @@ async function main() {
       rootCauseCategory: demo.regression.traReport.rootCauseCategory,
       summary: demo.regression.traReport.summary,
       recommendedAction: demo.regression.traReport.recommendedAction,
-      estimatedRecovery: demo.regression.traReport.estimatedRecovery,
+      impactRating: demo.regression.traReport.impactRating,
     },
   });
 

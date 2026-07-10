@@ -8,18 +8,18 @@ export default function DocsHomePage() {
       <div className="page-heading">
         <div>
           <p className="eyebrow">Documentation</p>
-          <h2>Learn the workflows that make FineTuneOps sticky for real teams</h2>
+          <h2>Run FineTuneOps where LLM teams already ship</h2>
           <p className="muted">
-            These guides cover the operational loop behind the product: capture
-            failures, build safer datasets, version prompts, run training jobs,
-            and gate releases.
+            These guides cover the product wedge: compare baseline and candidate
+            evals, explain regressions, gate releases in CI, and use TRA when
+            fine-tune training data is involved.
           </p>
         </div>
       </div>
 
       <SearchPanel
         scope="docs"
-        placeholder="Search docs, SDK usage, prompt versioning, release gates..."
+        placeholder="Search docs, CLI usage, TRA reports, release gates..."
         emptyCopy="Start typing to search the documentation."
         title="Search the docs"
       />
